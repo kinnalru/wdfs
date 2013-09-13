@@ -254,3 +254,31 @@ int cache_get_item(struct stat *stat, const char *remotepath)
 	return ret;
 }
 
+
+cached_file_t file_cache_t::get(const std::string& path)
+{
+    static const cached_file_t empty = cached_file_t();
+    
+    cache_t::iterator it = cache_.find(path);
+    return (it != cache_.end()) ? it->second : empty;
+}
+
+
+void file_cache_t::update(const std::string& path, const cached_file_t& file)
+{
+    cache_[path] = file;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+

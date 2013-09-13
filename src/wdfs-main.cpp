@@ -59,6 +59,7 @@
 #define ADVANCED_LOCK 2
 #define ETERNITY_LOCK 3
 
+file_cache_t cache;
 
 static void print_help();
 static int call_fuse_main(struct fuse_args *args);
@@ -704,6 +705,92 @@ static int wdfs_readdir(
 	return 0;
 }
 
+inline std::string normalize_etag(const char *etag)
+{
+    if (!etag) return std::string();
+
+    const char * e = etag;
+    if (*e == 'W') return std::string();
+    if (!*e) return std::string();
+
+    return std::string(etag);
+}
+
+struct neon_context_t {
+    ne_session* session;
+    
+    webdav_resource_t resource;
+};
+
+int post_send_handler(ne_request *req, void *userdata, const ne_status *status) {
+    
+    neon_context_t* ctx = reinterpret_cast<neon_context_t*>(userdata);
+    
+    ctx->resource.etag = normalize_etag(ne_get_response_header(req, "ETag"));
+
+    const char *lastmodified = ne_get_response_header(req, "Last-Modified");
+    if (!lastmodified) lastmodified = ne_get_response_header(req, "Date");
+
+    if (lastmodified) {
+        ctx->resource.stat.st_mtime = ne_rfc1123_parse(lastmodified);
+    } else {
+        ctx->resource.stat.st_mtime = 0;
+    }
+
+    
+    return NE_OK;
+}
+
+struct hook_helper_t {
+    ne_session* session;
+    neon_context_t* ctx;
+    
+    hook_helper_t(ne_session* s, neon_context_t* c) : session(s), ctx(c) {
+        assert(session);
+        assert(ctx);
+//         ne_hook_create_request(session, create_request_handler, ctx);
+        ne_hook_post_send(session, post_send_handler, ctx);
+    }
+    
+    ~hook_helper_t() {
+        ne_unhook_post_send(session, post_send_handler, ctx);        
+//         ne_unhook_create_request(session, create_request_handler, ctx);
+    }
+};
+
+int head(const std::string& path, webdav_resource_t* resource)
+{
+    std::shared_ptr<ne_request> request(
+        ne_request_create(session, "HEAD", path.c_str()),
+        ne_request_destroy
+    );
+    
+    int neon_stat = ne_request_dispatch(request.get());
+    
+    if (neon_stat != NE_OK) {
+        return neon_stat;
+    }
+    
+    resource->etag = normalize_etag(ne_get_response_header(request.get(), "ETag"));
+    
+    const char *lastmodified = ne_get_response_header(request.get(), "Last-Modified");
+    if (!lastmodified) lastmodified = ne_get_response_header(request.get(), "Date");
+
+    if (lastmodified) {
+        resource->stat.st_mtime = ne_rfc1123_parse(lastmodified);
+    } else {
+        resource->stat.st_mtime = 0;
+    }
+    
+    return 0;
+    
+/*    value = ne_get_response_header(request.get(), "Content-Length");
+    if (value) {
+        length = strtol(value, NULL, 10);
+    } else {
+        length = -1;
+    }   */ 
+}
 
 /* author jens, 13.08.2005 11:22:20, location: unknown, refactored in goettingen
  * get the file from the server already at open() and write the data to a new
@@ -721,10 +808,6 @@ static int wdfs_open(const char *localpath, struct fuse_file_info *fi)
 	struct open_file *file = g_new0(struct open_file, 1);
 	file->modified = false;
 
-	file->fh = get_filehandle();
-	if (file->fh == -1)
-		return -EIO;
-
 	char *remotepath;
 
 	if (wdfs.svn_mode == true && g_str_has_prefix(localpath, svn_basedir))
@@ -737,33 +820,58 @@ static int wdfs_open(const char *localpath, struct fuse_file_info *fi)
 		return -ENOMEM;
 	}
 
-	/* try to lock, if locking is enabled and file is not below svn_basedir. */
-	if (wdfs.locking_mode != NO_LOCK && 
-			!g_str_has_prefix(localpath, svn_basedir)) {
-		if (lockfile(remotepath, wdfs.locking_timeout)) {
-			/* locking the file is not possible, because the file is locked by 
-			 * somebody else. read-only access is allowed. */
-			if ((fi->flags & O_ACCMODE) == O_RDONLY) {
-				fprintf(stderr,
-					"## error: file %s is already locked. "
-					"allowing read-only (O_RDONLY) access!\n", remotepath);
-			} else {
-				FREE(file);
-				FREE(remotepath);
-				return -EACCES;
-			}
-		}
-	}
+	webdav_resource_t res;
+    
+    if (head(remotepath, &res)) {
+        return -ENOENT;
+    }
+	
+	cached_file_t c_file = cache.get(remotepath);
+    
+    if (res.etag == c_file.resource.etag && res.stat.st_mtime == c_file.resource.stat.st_mtime) {
+        file->fh = c_file.fd;
+    }
+    else {
 
-	/* GET the data to the filehandle even if the file is opened O_WRONLY,
-	 * because the opening application could use pwrite() or use O_APPEND
-	 * and than the data needs to be present. */
-	if (ne_get(session, remotepath, file->fh)) {
-		fprintf(stderr, "## GET error: %s\n", ne_get_error(session));
-		FREE(remotepath);
-		return -ENOENT;
-	}
+        file->fh = get_filehandle();
+        if (file->fh == -1)
+            return -EIO;
+        
+        /* try to lock, if locking is enabled and file is not below svn_basedir. */
+        if (wdfs.locking_mode != NO_LOCK && 
+                !g_str_has_prefix(localpath, svn_basedir)) {
+            if (lockfile(remotepath, wdfs.locking_timeout)) {
+                /* locking the file is not possible, because the file is locked by 
+                * somebody else. read-only access is allowed. */
+                if ((fi->flags & O_ACCMODE) == O_RDONLY) {
+                    fprintf(stderr,
+                        "## error: file %s is already locked. "
+                        "allowing read-only (O_RDONLY) access!\n", remotepath);
+                } else {
+                    FREE(file);
+                    FREE(remotepath);
+                    return -EACCES;
+                }
+            }
+        }
 
+        neon_context_t ctx{session};  
+        
+        hook_helper_t hooker(session, &ctx);
+        
+        /* GET the data to the filehandle even if the file is opened O_WRONLY,
+        * because the opening application could use pwrite() or use O_APPEND
+        * and than the data needs to be present. */    
+        if (ne_get(session, remotepath, file->fh)) {
+            fprintf(stderr, "## GET error: %s\n", ne_get_error(session));
+            FREE(remotepath);
+            return -ENOENT;        
+        }
+        
+        cache.update(remotepath, cached_file_t({ctx.resource, fi->fh}));
+    }
+
+    
 	FREE(remotepath);
 
 	/* save our "struct open_file" to the fuse filehandle
@@ -875,7 +983,7 @@ static int wdfs_release(const char *localpath, struct fuse_file_info *fi)
 	}
 
 	/* close filehandle and free memory */
-	close(file->fh);
+// 	close(file->fh); // TODO FIXME use cache
 	FREE(file);
 	FREE(remotepath);
 
