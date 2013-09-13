@@ -76,7 +76,7 @@ const char *project_name = PACKAGE_NAME"/"PACKAGE_VERSION;
 const char *project_uri = "http://noedler.de/projekte/wdfs/";
 
 /* init settings with default values */
-wdfs_conf init_conf() {
+struct wdfs_conf wdfs = [] () {
     struct wdfs_conf w;
     w.debug = false;
     w.accept_certificate = false;
@@ -88,9 +88,7 @@ wdfs_conf init_conf() {
     w.locking_timeout = 300;
     w.webdav_resource = NULL;
     return w;
-}
-
-struct wdfs_conf wdfs = init_conf();
+} ();
 
 enum {
 	KEY_HELP,
@@ -217,17 +215,6 @@ enum field_e {
     EXECUTE,
     PERMISSIONS,
     END
-};
-
-/* webdav properties used to get file attributes */
-static const ne_propname properties_fileattr1[] = {
-	{ "DAV:", "resourcetype" },
-	{ "DAV:", "getcontentlength" },
-	{ "DAV:", "getlastmodified" },
-	{ "DAV:", "creationdate" },
-    {"http://apache.org/dav/props/", "executable"},
-    {"DAVQT:", "permissions"},
-	{ NULL }  /* MUST be NULL terminated! */
 };
 
 static const std::vector<ne_propname> prop_names = [] {
@@ -1209,14 +1196,20 @@ int wdfs_chmod(const char *localpath, mode_t mode)
 		print_debug_infos(__func__, localpath);
 
     std::auto_ptr<char> remotepath(get_remotepath(localpath));
-    const std::string value = std::to_string(mode);
+    const std::string mode_str = std::to_string(mode);
+    const std::string exec_str = (mode & S_IXUSR || mode & S_IXGRP || mode &S_IXOTH) ? "T" : "F";
     
-	const ne_proppatch_operation ops[2] = {
+	const ne_proppatch_operation ops[] = {
+        {
+            &prop_names[EXECUTE],
+            ne_propset,
+            exec_str.c_str()
+        },
         {
             &prop_names[PERMISSIONS],
             ne_propset,
-            value.c_str()
-        },
+            mode_str.c_str()
+        },        
         NULL
     };
     
@@ -1286,8 +1279,7 @@ static void wdfs_destroy(void*)
 	svn_free_repository_root();
 }
 
-
-fuse_operations init_operations() {
+static struct fuse_operations wdfs_operations  = [] () {
     fuse_operations wo;
     
     wo.getattr    = wdfs_getattr;
@@ -1313,9 +1305,7 @@ fuse_operations init_operations() {
     wo.destroy    = wdfs_destroy;
     
     return wo;
-}
-
-static struct fuse_operations wdfs_operations = init_operations();
+} ();
 
 
 /* author jens, 26.08.2005 12:26:59, location: lystrup near aarhus 
