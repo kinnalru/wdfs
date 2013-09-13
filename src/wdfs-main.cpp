@@ -71,17 +71,21 @@ const char *project_name = PACKAGE_NAME"/"PACKAGE_VERSION;
 const char *project_uri = "http://noedler.de/projekte/wdfs/";
 
 /* init settings with default values */
-struct wdfs_conf wdfs = {
-	.debug = false,
-	.accept_certificate = false,
-	.username = NULL,
-	.password = NULL,
-	.redirect = true,
-	.svn_mode = false,
-	.locking_mode = NO_LOCK,
-	.locking_timeout = 300,
-	.webdav_resource = NULL,
-};
+wdfs_conf init_conf() {
+    struct wdfs_conf w;
+    w.debug = false;
+    w.accept_certificate = false;
+    w.username = NULL;
+    w.password = NULL;
+    w.redirect = true;
+    w.svn_mode = false;
+    w.locking_mode = NO_LOCK;
+    w.locking_timeout = 300;
+    w.webdav_resource = NULL;
+    return w;
+}
+
+struct wdfs_conf wdfs = init_conf();
 
 enum {
 	KEY_HELP,
@@ -199,6 +203,16 @@ struct open_file {
 	bool_t modified;	/* set true if the filehandle's content is modified  */
 };
 
+enum {
+    TYPE = 0,
+    LENGTH,
+    MODIFIED,    
+    CREATION,    
+    ETAG,
+    EXECUTE,
+    PERMISSIONS,
+    END
+};
 
 /* webdav properties used to get file attributes */
 static const ne_propname properties_fileattr[] = {
@@ -206,6 +220,8 @@ static const ne_propname properties_fileattr[] = {
 	{ "DAV:", "getcontentlength" },
 	{ "DAV:", "getlastmodified" },
 	{ "DAV:", "creationdate" },
+    {"http://apache.org/dav/props/", "executable"},
+    {"DAVQT:", "permissions"},
 	{ NULL }  /* MUST be NULL terminated! */
 };
 
@@ -305,24 +321,6 @@ char* unify_path(const char *path_in, int mode)
 }
 
 
-/* mac os x lacks support for strndup() because it's a gnu extension. 
- * be gentle to the apples and define the required method. */
-#ifndef HAVE_STRNDUP
-char* strndup(const char *str, size_t len1)
-{
- 	size_t len2 = strlen(str);
-	if (len1 < len2)
-		len2 = len1;
-
-	char *result = (char *)malloc(len2 + 1);
-	if (result == NULL)
-		return NULL;
-
-	result[len2] = '\0';
-	return (char *)memcpy(result, str, len2);
-}
-#endif
-
 
 /* +++ helper methods +++ */
 
@@ -376,7 +374,7 @@ static void set_stat(struct stat* stat, const ne_prop_result_set *results)
 	if (wdfs.debug == true)
 		print_debug_infos(__func__, "");
 
-	const char *resourcetype, *contentlength, *lastmodified, *creationdate;
+	const char *resourcetype, *contentlength, *lastmodified, *creationdate, *exec, *mode;
 	assert(stat && results);
 	memset(stat, 0, sizeof(struct stat));
 
@@ -385,6 +383,8 @@ static void set_stat(struct stat* stat, const ne_prop_result_set *results)
 	contentlength	= ne_propset_value(results, &properties_fileattr[1]);
 	lastmodified	= ne_propset_value(results, &properties_fileattr[2]);
 	creationdate	= ne_propset_value(results, &properties_fileattr[3]);
+	exec	= ne_propset_value(results, &properties_fileattr[4]);
+	mode	= ne_propset_value(results, &properties_fileattr[5]);
 
 	/* webdav collection == directory entry */
 	if (resourcetype != NULL && !strstr("<collection", resourcetype)) {
@@ -418,6 +418,8 @@ static void set_stat(struct stat* stat, const ne_prop_result_set *results)
 	/* no need to set a restrict mode, because fuse filesystems can
 	 * only be accessed by the user that mounted the filesystem.  */
 	stat->st_mode &= ~umask(0);
+	if (mode != NULL)
+		stat->st_mode = atoi(mode);
 	stat->st_uid = getuid();
 	stat->st_gid = getgid();
 }
@@ -1179,6 +1181,25 @@ int wdfs_chmod(const char *localpath, mode_t mode)
 
 	fprintf(stderr, "## error: chmod() is not (yet) implemented.\n");
 
+
+	char *remotepath = get_remotepath(localpath);
+
+	char str[15];
+	sprintf(str, "%d", mode);
+
+	const ne_proppatch_operation ops[2] = {
+        {
+            &properties_fileattr[5],
+            ne_propset,
+            str
+        },
+        NULL
+    };
+    
+    int neon_stat = ne_proppatch(session, remotepath, ops);
+    
+	FREE(remotepath);
+
 	return 0;
 }
 
@@ -1227,7 +1248,7 @@ static int wdfs_statfs(const char *localpath, struct statvfs *buf)
 
 /* author jens, 04.08.2005 17:41:12, location: goettingen
  * this method is called, when the filesystems is unmounted. time to clean up! */
-static void wdfs_destroy()
+static void wdfs_destroy(void*)
 {
 	if (wdfs.debug == true)
 		fprintf(stderr, ">> freeing globaly used memory\n");
@@ -1241,29 +1262,35 @@ static void wdfs_destroy()
 }
 
 
-static struct fuse_operations wdfs_operations = {
-	.getattr	= wdfs_getattr,
-	.readdir	= wdfs_readdir,
-	.open		= wdfs_open,
-	.read		= wdfs_read,
-	.write		= wdfs_write,
-	.release	= wdfs_release,
-	.truncate	= wdfs_truncate,
-	.ftruncate	= wdfs_ftruncate,
-	.mknod		= wdfs_mknod,
-	.mkdir		= wdfs_mkdir,
-	/* webdav treats file and directory deletions equal, both use wdfs_unlink */
-	.unlink		= wdfs_unlink,
-	.rmdir		= wdfs_unlink,
-	.rename		= wdfs_rename,
-	.chmod		= wdfs_chmod,
-	/* utime should be better named setattr
-	 * see: http://sourceforge.net/mailarchive/message.php?msg_id=11344401 */
-	.utime		= wdfs_setattr,
-	.statfs		= wdfs_statfs,
-	.init		= wdfs_init,
-	.destroy	= wdfs_destroy,
-};
+fuse_operations init_operations() {
+    fuse_operations wo;
+    
+    wo.getattr    = wdfs_getattr;
+    wo.readdir    = wdfs_readdir;
+    wo.open       = wdfs_open;
+    wo.read       = wdfs_read;
+    wo.write      = wdfs_write;
+    wo.release    = wdfs_release;
+    wo.truncate   = wdfs_truncate;
+    wo.ftruncate  = wdfs_ftruncate;
+    wo.mknod      = wdfs_mknod;
+    wo.mkdir      = wdfs_mkdir;
+    /* webdav treats file and directory deletions equal, both use wdfs_unlink */
+    wo.unlink     = wdfs_unlink;
+    wo.rmdir      = wdfs_unlink;
+    wo.rename     = wdfs_rename;
+    wo.chmod      = wdfs_chmod;
+    /* utime should be better named setattr
+     * see: http://sourceforge.net/mailarchive/message.php?msg_id=11344401 */
+    wo.utime      = wdfs_setattr;
+    wo.statfs     = wdfs_statfs;
+    wo.init       = wdfs_init;
+    wo.destroy    = wdfs_destroy;
+    
+    return wo;
+}
+
+static struct fuse_operations wdfs_operations = init_operations();
 
 
 /* author jens, 26.08.2005 12:26:59, location: lystrup near aarhus 

@@ -29,10 +29,9 @@
 	esac
 */
 
-typedef enum {
-	true 	= 1,
-	false 	= 0
-} bool_t;
+
+typedef bool bool_t;
+
 
 /* used as mode for unify_path() */
 enum {
@@ -86,9 +85,5 @@ void free_chars(char **arg, ...);
 
 /* takes an lvalue and sets it to NULL after freeing. taken from neon. */
 #define FREE(x) do { if ((x) != NULL) free((x)); (x) = NULL; } while (0)
-
-#ifndef HAVE_STRNDUP
-	char* strndup(const char *s, size_t n);
-#endif
 
 #endif /*WDFSMAIN_H_*/
