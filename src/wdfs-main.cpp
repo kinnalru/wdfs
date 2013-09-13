@@ -37,10 +37,15 @@
 #include <ne_dates.h>
 #include <ne_redirect.h>
 
+#include <memory>
+#include <vector>
+#include <string>
+
 #include "wdfs-main.h"
 #include "webdav.h"
 #include "cache.h"
 #include "svn.h"
+
 
 
 /* there are four locking modes available. the simple locking mode locks a file 
@@ -203,7 +208,7 @@ struct open_file {
 	bool_t modified;	/* set true if the filehandle's content is modified  */
 };
 
-enum {
+enum field_e {
     TYPE = 0,
     LENGTH,
     MODIFIED,    
@@ -215,7 +220,7 @@ enum {
 };
 
 /* webdav properties used to get file attributes */
-static const ne_propname properties_fileattr[] = {
+static const ne_propname properties_fileattr1[] = {
 	{ "DAV:", "resourcetype" },
 	{ "DAV:", "getcontentlength" },
 	{ "DAV:", "getlastmodified" },
@@ -225,6 +230,24 @@ static const ne_propname properties_fileattr[] = {
 	{ NULL }  /* MUST be NULL terminated! */
 };
 
+static const std::vector<ne_propname> prop_names = [] {
+    std::vector<ne_propname> v(END + 1);
+    v[ETAG]     = {"DAV:", "getetag"};
+    v[LENGTH]   = {"DAV:", "getcontentlength"};
+    v[CREATION] = {"DAV:", "creationdate"};
+    v[MODIFIED] = {"DAV:", "getlastmodified"};
+    v[TYPE]     = {"DAV:", "resourcetype"};
+    v[EXECUTE]  = {"http://apache.org/dav/props/", "executable"};
+    v[PERMISSIONS]  = {"DAVQT:", "permissions"};
+    v[END]      = {NULL, NULL}; 
+    return v;
+} ();
+
+static const std::vector<ne_propname> anonymous_prop_names = [] {
+    std::vector<ne_propname> v = prop_names;
+    for(auto it = v.begin(); it != v.end(); ++ it) it->nspace = NULL;
+    return v;
+} ();
 
 /* +++ exported method +++ */
 
@@ -367,6 +390,12 @@ static int get_filehandle()
 	return fh;
 }
 
+const char* get_helper(const ne_prop_result_set *results, field_e field) {
+    const char* data = ne_propset_value(results, &prop_names[field]);
+    return (data) 
+        ? data
+        : ne_propset_value(results, &anonymous_prop_names[field]);
+}
 
 /* evaluates the propfind result set and sets the file's attributes (stat) */
 static void set_stat(struct stat* stat, const ne_prop_result_set *results)
@@ -374,17 +403,17 @@ static void set_stat(struct stat* stat, const ne_prop_result_set *results)
 	if (wdfs.debug == true)
 		print_debug_infos(__func__, "");
 
-	const char *resourcetype, *contentlength, *lastmodified, *creationdate, *exec, *mode;
+	const char *resourcetype, *contentlength, *lastmodified, *creationdate, *executable, *mode;
 	assert(stat && results);
 	memset(stat, 0, sizeof(struct stat));
 
 	/* get the values from the propfind result set */
-	resourcetype	= ne_propset_value(results, &properties_fileattr[0]);
-	contentlength	= ne_propset_value(results, &properties_fileattr[1]);
-	lastmodified	= ne_propset_value(results, &properties_fileattr[2]);
-	creationdate	= ne_propset_value(results, &properties_fileattr[3]);
-	exec	= ne_propset_value(results, &properties_fileattr[4]);
-	mode	= ne_propset_value(results, &properties_fileattr[5]);
+	resourcetype	= get_helper(results, TYPE);
+	contentlength	= get_helper(results, LENGTH);
+	lastmodified	= get_helper(results, MODIFIED);
+	creationdate	= get_helper(results, CREATION);
+	executable	    = get_helper(results, EXECUTE);
+	mode	        = get_helper(results, PERMISSIONS);
 
 	/* webdav collection == directory entry */
 	if (resourcetype != NULL && !strstr("<collection", resourcetype)) {
@@ -531,14 +560,14 @@ static int wdfs_getattr(const char *localpath, struct stat *stat)
 	/* stat not found in the cache? perform a propfind to get stat! */
 	if (cache_get_item(stat, remotepath)) {
 		int ret = ne_simple_propfind(
-			session, remotepath, NE_DEPTH_ZERO, properties_fileattr,
+			session, remotepath, NE_DEPTH_ZERO, &prop_names[0],
 			wdfs_getattr_propfind_callback, stat);
 		/* handle the redirect and retry the propfind with the new target */
 		if (ret == NE_REDIRECT && wdfs.redirect == true) {
 			if (handle_redirect(&remotepath))
 				return -ENOENT;
 			ret = ne_simple_propfind(
-				session, remotepath, NE_DEPTH_ZERO, properties_fileattr,
+				session, remotepath, NE_DEPTH_ZERO, &prop_names[0],
 				wdfs_getattr_propfind_callback, stat);
 		}
 		if (ret != NE_OK) {
@@ -661,14 +690,14 @@ static int wdfs_readdir(
 
 	int ret = ne_simple_propfind(
 		session, item_data.remotepath, NE_DEPTH_ONE,
-		properties_fileattr, wdfs_readdir_propfind_callback, &item_data);
+		&prop_names[0], wdfs_readdir_propfind_callback, &item_data);
 	/* handle the redirect and retry the propfind with the redirect target */
 	if (ret == NE_REDIRECT && wdfs.redirect == true) {
 		if (handle_redirect(&item_data.remotepath))
 			return -ENOENT;
 		ret = ne_simple_propfind(
 			session, item_data.remotepath, NE_DEPTH_ONE,
-			properties_fileattr, wdfs_readdir_propfind_callback, &item_data);
+			&prop_names[0], wdfs_readdir_propfind_callback, &item_data);
 	}
 	if (ret != NE_OK) {
 			fprintf(stderr, "## PROPFIND error in %s(): %s\n",
@@ -1179,27 +1208,23 @@ int wdfs_chmod(const char *localpath, mode_t mode)
 	if (wdfs.debug == true)
 		print_debug_infos(__func__, localpath);
 
-	fprintf(stderr, "## error: chmod() is not (yet) implemented.\n");
-
-
-	char *remotepath = get_remotepath(localpath);
-
-	char str[15];
-	sprintf(str, "%d", mode);
-
+    std::auto_ptr<char> remotepath(get_remotepath(localpath));
+    const std::string value = std::to_string(mode);
+    
 	const ne_proppatch_operation ops[2] = {
         {
-            &properties_fileattr[5],
+            &prop_names[PERMISSIONS],
             ne_propset,
-            str
+            value.c_str()
         },
         NULL
     };
     
-    int neon_stat = ne_proppatch(session, remotepath, ops);
+    if (ne_proppatch(session, remotepath.get(), ops)) {
+        fprintf(stderr, "PROPPATCH error: %s\n", ne_get_error(session));
+        return -ENOENT;
+    }
     
-	FREE(remotepath);
-
 	return 0;
 }
 
