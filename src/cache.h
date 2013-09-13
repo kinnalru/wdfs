@@ -4,24 +4,18 @@
 #include <string>
 #include <map>
 
+#include "common.h"
+
 void cache_initialize();
 void cache_destroy();
 void cache_add_item(struct stat *stat, const char *remotepath);
 void cache_delete_item(const char *remotepath);
 int cache_get_item(struct stat *stat, const char *remotepath);
 
-#endif /*CACHE_H_*/
-
-typedef std::string etag_t;
-
-struct webdav_resource_t {
-    etag_t etag;
-    struct stat stat;
-};
 
 struct cached_file_t {
     webdav_resource_t resource;
-    uint64_t fd;
+    int fd;
 };
 
 class file_cache_t {
@@ -38,3 +32,6 @@ public:
 private:
     cache_t cache_;
 };
+
+
+#endif /*CACHE_H_*/

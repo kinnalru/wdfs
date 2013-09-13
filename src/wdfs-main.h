@@ -29,34 +29,22 @@
 	esac
 */
 
-
-typedef bool bool_t;
-
-
-/* used as mode for unify_path() */
-enum {
-	ESCAPE     = 0x0,
-	UNESCAPE   = 0x1,
-	/* do not remove trailing slashes */
-	LEAVESLASH = 0x2
-};
-
 struct wdfs_conf {
 	/* the name of the wdfs executable */
 	char *program_name;
 	/* if set to "true" wdfs specific debug output is generated */
-	bool_t debug;
+	bool debug;
 	/* if set to "true" every certificate is accepted without asking the user */
-	bool_t accept_certificate;
+	bool accept_certificate;
 	/* username of the webdav resource */
 	char *username;
 	/* password of the webdav resource */
 	char *password;
 	/* if set to "true" enables http redirect support */
-	bool_t redirect;
+	bool redirect;
 	/* if set to "true" enables transparent access to all svn revisions in
 	 * a repository thru a virtual directory. */
-	bool_t svn_mode;
+	bool svn_mode;
 	/* locking mode of files */
 	int locking_mode;
 	/* timeout for a lock in seconds */
@@ -78,12 +66,5 @@ struct dir_item {
 	fuse_fill_dir_t filler;
 	char *remotepath;
 };
-
-char* remove_ending_slashes(const char *in);
-char* unify_path(const char *in, int mode);
-void free_chars(char **arg, ...);
-
-/* takes an lvalue and sets it to NULL after freeing. taken from neon. */
-#define FREE(x) do { if ((x) != NULL) free((x)); (x) = NULL; } while (0)
 
 #endif /*WDFSMAIN_H_*/

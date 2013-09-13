@@ -19,6 +19,7 @@ add_definitions(-D_GNU_SOURCE -D_REENTRANT)
 
 set(HEADERS
 	cache.h
+	common.h
 	config.h
 	svn.h
 	wdfs-main.h
@@ -30,6 +31,7 @@ set(SOURCES
 	svn.cpp
 	webdav.cpp
 	wdfs-main.cpp
+	common.cpp
 )
 
 add_executable(${TARGET} ${HEADERS} ${SOURCES})

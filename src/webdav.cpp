@@ -30,11 +30,23 @@
 #include <unistd.h>
 #include <assert.h>
 #include <termios.h>
-#include <ne_basic.h>
+
+#include <memory>
+
+#include <ne_alloc.h>
 #include <ne_auth.h>
+#include <ne_basic.h>
+#include <ne_dates.h>
 #include <ne_locks.h>
-#include <ne_socket.h>
+#include <ne_props.h>
 #include <ne_redirect.h>
+#include <ne_request.h>
+#include <ne_session.h>
+#include <ne_socket.h>
+#include <ne_string.h>
+#include <ne_uri.h>
+#include <ne_utils.h>
+#include <ne_xml.h>
 
 #include "wdfs-main.h"
 #include "webdav.h"
@@ -429,4 +441,51 @@ void unlock_all_files()
 		ne_lockstore_destroy(store);
 	}
 }
+
+inline void fill_resource(webdav_resource_t* resource, ne_request* request) {
+    resource->etag = normalize_etag(ne_get_response_header(request, "ETag"));
+
+    const char *lastmodified = ne_get_response_header(request, "Last-Modified");
+    if (!lastmodified) lastmodified = ne_get_response_header(request, "Date");
+
+    resource->stat.st_mtime = (lastmodified)
+        ? ne_rfc1123_parse(lastmodified)
+        : 0;
+        
+    const char *contentlength = ne_get_response_header(request, "Content-Length");
+    
+    resource->stat.st_size = (contentlength)
+        ? atoll(contentlength)
+        : 0;
+}
+
+int post_send_handler(ne_request* request, void* userdata, const ne_status* status)
+{
+    webdav_context_t* ctx = reinterpret_cast<webdav_context_t*>(userdata);
+    fill_resource(&ctx->resource, request);
+    return NE_OK;
+}
+
+int get_head(ne_session* session, const std::string& path, webdav_resource_t* resource)
+{
+    std::shared_ptr<ne_request> request(
+        ne_request_create(session, "HEAD", path.c_str()),
+        ne_request_destroy
+    );
+
+    int neon_stat = ne_request_dispatch(request.get());
+
+    if (ne_request_dispatch(request.get()) != NE_OK) {
+        return neon_stat;
+    }
+
+    fill_resource(resource, request.get());
+
+    return 0;
+}
+
+
+
+
+
 

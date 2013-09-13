@@ -24,13 +24,9 @@
  *  that compiling, linking and/or using OpenSSL is allowed.
  */
 
-#include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 #include <errno.h>
-#include <fcntl.h>
 #include <assert.h>
-#include <unistd.h>
 #include <glib.h>
 #include <fuse_opt.h>
 #include <ne_props.h>
@@ -40,6 +36,7 @@
 #include <memory>
 #include <vector>
 #include <string>
+#include <iostream>
 
 #include "wdfs-main.h"
 #include "webdav.h"
@@ -203,8 +200,8 @@ char *remotepath_basedir;
 
 /* infos about an open file. used by open(), read(), write() and release()   */
 struct open_file {
-	unsigned long fh;	/* this file's filehandle                            */
-	bool_t modified;	/* set true if the filehandle's content is modified  */
+	int fh;	/* this file's filehandle                            */
+	bool modified;	/* set true if the filehandle's content is modified  */
 };
 
 enum field_e {
@@ -236,104 +233,6 @@ static const std::vector<ne_propname> anonymous_prop_names = [] {
     for(auto it = v.begin(); it != v.end(); ++ it) it->nspace = NULL;
     return v;
 } ();
-
-/* +++ exported method +++ */
-
-
-/* free()s each char passed that is not NULL and sets it to NULL after freeing */
-void free_chars(char **arg, ...)
-{
-	va_list ap;
-	va_start(ap, arg);
-	while (arg) {
-		if (*arg != NULL)
-			free(*arg);
-		*arg = NULL;
-		/* get the next parameter */
-		arg = va_arg(ap, char **);
-	}
-	va_end(ap);
-}
-
-
-/* removes all trailing slashes from the path. 
- * returns the new malloc()d path or NULL on error.  */
-char* remove_ending_slashes(const char *path)
-{
-	char *new_path = strdup(path);
-	int pos = strlen(path) - 1;
-
-	while(pos >= 0  &&  new_path[pos] == '/')
-		new_path[pos--] = '\0';
-
-	return new_path;
-}
-
-
-/* unifies the given path by removing the ending slash and escaping or 
- * unescaping the path. returns the new malloc()d string or NULL on error. */
-char* unify_path(const char *path_in, int mode)
-{
-	assert(path_in);
-	char *path_tmp, *path_out = NULL;
-
-	path_tmp = strdup(path_in);
-	if (path_tmp == NULL)
-		return NULL;
-
-	/* some servers send the complete URI not only the path.
-	 * hence remove the server part and use the path only.
-	 * example1:  before: "https://server.com/path/to/hell/"
-	 *            after:  "/path/to/hell/"
-	 * example2:  before: "http://server.com"
-	 *            after:  ""                    */
-	if (g_str_has_prefix(path_tmp, "http")) {
-		char *tmp0 = strdup(path_in);
-		FREE(path_tmp);
-		/* jump to the 1st '/' of http[s]:// */
-		char *tmp1 = strchr(tmp0, '/');
-		/* jump behind '//' and get the next '/'. voila: the path! */
-		char *tmp2 = strchr(tmp1 + 2, '/');
-
-		if (tmp2 == NULL)
-			path_tmp = strdup("");
-		else
-			path_tmp = strdup(tmp2);
-
-		FREE(tmp0);
-	}
-
-	if (mode & LEAVESLASH) {
-		mode &= ~LEAVESLASH;
-	} else {
-		path_tmp = remove_ending_slashes(path_tmp);
-	}
-	
-	if (path_tmp == NULL)
-		return NULL;
-
-	switch (mode) {
-		case ESCAPE:
-			path_out = ne_path_escape(path_tmp);
-			break;
-		case UNESCAPE:
-			path_out = ne_path_unescape(path_tmp);
-			break;
-		default:
-			fprintf(stderr, "## fatal error: unknown mode in %s()\n", __func__);
-			exit(1);
-	}
-
-	FREE(path_tmp);
-	if (path_out == NULL)
-		return NULL;
-
-	return path_out;
-}
-
-
-
-/* +++ helper methods +++ */
 
 
 /* this method prints some debug output and sets the http user agent string to
@@ -391,7 +290,11 @@ static void set_stat(struct stat* stat, const ne_prop_result_set *results)
 	if (wdfs.debug == true)
 		print_debug_infos(__func__, "");
 
+<<<<<<< HEAD
 	const char *resourcetype, *contentlength, *lastmodified, *creationdate, *executable, *modestr;
+=======
+	const char *resourcetype, *contentlength, *lastmodified, *creationdate, *mode;
+>>>>>>> simple file cache implemented.
 	assert(stat && results);
 	memset(stat, 0, sizeof(struct stat));
 
@@ -705,92 +608,6 @@ static int wdfs_readdir(
 	return 0;
 }
 
-inline std::string normalize_etag(const char *etag)
-{
-    if (!etag) return std::string();
-
-    const char * e = etag;
-    if (*e == 'W') return std::string();
-    if (!*e) return std::string();
-
-    return std::string(etag);
-}
-
-struct neon_context_t {
-    ne_session* session;
-    
-    webdav_resource_t resource;
-};
-
-int post_send_handler(ne_request *req, void *userdata, const ne_status *status) {
-    
-    neon_context_t* ctx = reinterpret_cast<neon_context_t*>(userdata);
-    
-    ctx->resource.etag = normalize_etag(ne_get_response_header(req, "ETag"));
-
-    const char *lastmodified = ne_get_response_header(req, "Last-Modified");
-    if (!lastmodified) lastmodified = ne_get_response_header(req, "Date");
-
-    if (lastmodified) {
-        ctx->resource.stat.st_mtime = ne_rfc1123_parse(lastmodified);
-    } else {
-        ctx->resource.stat.st_mtime = 0;
-    }
-
-    
-    return NE_OK;
-}
-
-struct hook_helper_t {
-    ne_session* session;
-    neon_context_t* ctx;
-    
-    hook_helper_t(ne_session* s, neon_context_t* c) : session(s), ctx(c) {
-        assert(session);
-        assert(ctx);
-//         ne_hook_create_request(session, create_request_handler, ctx);
-        ne_hook_post_send(session, post_send_handler, ctx);
-    }
-    
-    ~hook_helper_t() {
-        ne_unhook_post_send(session, post_send_handler, ctx);        
-//         ne_unhook_create_request(session, create_request_handler, ctx);
-    }
-};
-
-int head(const std::string& path, webdav_resource_t* resource)
-{
-    std::shared_ptr<ne_request> request(
-        ne_request_create(session, "HEAD", path.c_str()),
-        ne_request_destroy
-    );
-    
-    int neon_stat = ne_request_dispatch(request.get());
-    
-    if (neon_stat != NE_OK) {
-        return neon_stat;
-    }
-    
-    resource->etag = normalize_etag(ne_get_response_header(request.get(), "ETag"));
-    
-    const char *lastmodified = ne_get_response_header(request.get(), "Last-Modified");
-    if (!lastmodified) lastmodified = ne_get_response_header(request.get(), "Date");
-
-    if (lastmodified) {
-        resource->stat.st_mtime = ne_rfc1123_parse(lastmodified);
-    } else {
-        resource->stat.st_mtime = 0;
-    }
-    
-    return 0;
-    
-/*    value = ne_get_response_header(request.get(), "Content-Length");
-    if (value) {
-        length = strtol(value, NULL, 10);
-    } else {
-        length = -1;
-    }   */ 
-}
 
 /* author jens, 13.08.2005 11:22:20, location: unknown, refactored in goettingen
  * get the file from the server already at open() and write the data to a new
@@ -803,7 +620,7 @@ static int wdfs_open(const char *localpath, struct fuse_file_info *fi)
 			">> %s() by PID %d\n", __func__, fuse_get_context()->pid);
 	}
 
-	assert(localpath &&  &fi);
+	assert(localpath && fi);
 
 	struct open_file *file = g_new0(struct open_file, 1);
 	file->modified = false;
@@ -822,7 +639,7 @@ static int wdfs_open(const char *localpath, struct fuse_file_info *fi)
 
 	webdav_resource_t res;
     
-    if (head(remotepath, &res)) {
+    if (get_head(session, remotepath, &res)) {
         return -ENOENT;
     }
 	
@@ -855,20 +672,20 @@ static int wdfs_open(const char *localpath, struct fuse_file_info *fi)
             }
         }
 
-        neon_context_t ctx{session};  
+        webdav_context_t ctx{session};  
         
         hook_helper_t hooker(session, &ctx);
         
         /* GET the data to the filehandle even if the file is opened O_WRONLY,
         * because the opening application could use pwrite() or use O_APPEND
-        * and than the data needs to be present. */    
+        * and than the data needs to be present. */   
         if (ne_get(session, remotepath, file->fh)) {
             fprintf(stderr, "## GET error: %s\n", ne_get_error(session));
             FREE(remotepath);
             return -ENOENT;        
         }
         
-        cache.update(remotepath, cached_file_t({ctx.resource, fi->fh}));
+        cache.update(remotepath, cached_file_t({ctx.resource, file->fh}));
     }
 
     
@@ -890,7 +707,7 @@ static int wdfs_read(
 	if (wdfs.debug == true)
 		print_debug_infos(__func__, localpath);
 
-	assert(localpath && buf &&  &fi);
+	assert(localpath && buf && fi);
 
 	struct open_file *file = (struct open_file*)(uintptr_t)fi->fh;
 
@@ -912,7 +729,7 @@ static int wdfs_write(
 	if (wdfs.debug == true)
 		print_debug_infos(__func__, localpath);
 
-	assert(localpath && buf &&  &fi);
+	assert(localpath && buf && fi);
 
 	/* data below svn_basedir is read-only */
 	if (wdfs.svn_mode == true && g_str_has_prefix(localpath, svn_basedir))
@@ -1088,7 +905,7 @@ static int wdfs_ftruncate(
 	if (wdfs.debug == true)
 		print_debug_infos(__func__, localpath);
 
-	assert(localpath &&  &fi);
+	assert(localpath && fi);
 
 	/* data below svn_basedir is read-only */
 	if (wdfs.svn_mode == true && g_str_has_prefix(localpath, svn_basedir))
@@ -1319,7 +1136,7 @@ int wdfs_chmod(const char *localpath, mode_t mode)
             ne_propset,
             mode_str.c_str()
         },        
-        NULL
+        {NULL}
     };
     
     if (ne_proppatch(session, remotepath.get(), ops)) {
