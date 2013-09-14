@@ -200,7 +200,7 @@ char *remotepath_basedir;
 
 /* infos about an open file. used by open(), read(), write() and release()   */
 struct open_file {
-	int fh;	/* this file's filehandle                            */
+	int fd;	/* this file's filehandle                            */
 	bool modified;	/* set true if the filehandle's content is modified  */
 };
 
@@ -223,7 +223,7 @@ static const std::vector<ne_propname> prop_names = [] {
     v[MODIFIED] = {"DAV:", "getlastmodified"};
     v[TYPE]     = {"DAV:", "resourcetype"};
     v[EXECUTE]  = {"http://apache.org/dav/props/", "executable"};
-    v[PERMISSIONS]  = {"DAVQT:", "permissions"};
+    v[PERMISSIONS]  = {"X-DAV:", "permissions"};
     v[END]      = {NULL, NULL}; 
     return v;
 } ();
@@ -623,74 +623,76 @@ static int wdfs_open(const char *localpath, struct fuse_file_info *fi)
 	assert(localpath && fi);
 
 	struct open_file *file = g_new0(struct open_file, 1);
+    file->fd = -1;
 	file->modified = false;
 
-	char *remotepath;
+	std::unique_ptr<char> remotepath;
 
 	if (wdfs.svn_mode == true && g_str_has_prefix(localpath, svn_basedir))
-		remotepath = svn_get_remotepath(localpath);
+		remotepath.reset(svn_get_remotepath(localpath));
 	else
-		remotepath = get_remotepath(localpath);
+		remotepath.reset(get_remotepath(localpath));
 
 	if (remotepath == NULL) {
 		FREE(file);
 		return -ENOMEM;
 	}
 
-	webdav_resource_t res;
+	webdav_resource_t resource;
     
-    if (get_head(session, remotepath, &res)) {
+    if (get_head(session, remotepath.get(), &resource)) {
         return -ENOENT;
     }
 	
-	cached_file_t c_file = cache.get(remotepath);
+	//TODO FIXME Etag must be everytime
+	cached_file_t c_file = cache.get(remotepath.get());
     
-    if (res.etag == c_file.resource.etag && res.stat.st_mtime == c_file.resource.stat.st_mtime) {
-        file->fh = c_file.fd;
+    if (resource.etag && !resource.etag->empty()) {
+        if (resource.etag == c_file.resource.etag) {
+            file->fd = c_file.fd;
+        }
     }
-    else {
-
-        file->fh = get_filehandle();
-        if (file->fh == -1)
+    else if(resource.stat.st_mtime && (resource.stat.st_mtime == c_file.resource.stat.st_mtime)) {
+        file->fd = c_file.fd;
+    }
+    
+    if (file->fd == -1) {
+        file->fd = get_filehandle();
+        if (file->fd == -1)
             return -EIO;
         
         /* try to lock, if locking is enabled and file is not below svn_basedir. */
         if (wdfs.locking_mode != NO_LOCK && 
                 !g_str_has_prefix(localpath, svn_basedir)) {
-            if (lockfile(remotepath, wdfs.locking_timeout)) {
+            if (lockfile(remotepath.get(), wdfs.locking_timeout)) {
                 /* locking the file is not possible, because the file is locked by 
                 * somebody else. read-only access is allowed. */
                 if ((fi->flags & O_ACCMODE) == O_RDONLY) {
                     fprintf(stderr,
                         "## error: file %s is already locked. "
-                        "allowing read-only (O_RDONLY) access!\n", remotepath);
+                        "allowing read-only (O_RDONLY) access!\n", remotepath.get());
                 } else {
                     FREE(file);
-                    FREE(remotepath);
                     return -EACCES;
                 }
             }
         }
 
         webdav_context_t ctx{session};  
-        
+        ctx.resource.etag.reset(etag_t()); //disable etag facility
         hook_helper_t hooker(session, &ctx);
         
         /* GET the data to the filehandle even if the file is opened O_WRONLY,
         * because the opening application could use pwrite() or use O_APPEND
         * and than the data needs to be present. */   
-        if (ne_get(session, remotepath, file->fh)) {
+        if (ne_get(session, remotepath.get(), file->fd)) {
             fprintf(stderr, "## GET error: %s\n", ne_get_error(session));
-            FREE(remotepath);
             return -ENOENT;        
         }
-        
-        cache.update(remotepath, cached_file_t({ctx.resource, file->fh}));
+        cache.update(remotepath.get(), cached_file_t(ctx.resource, file->fd));
     }
 
     
-	FREE(remotepath);
-
 	/* save our "struct open_file" to the fuse filehandle
 	 * this looks like a dirty hack too me, but it's the fuse way... */
 	fi->fh = (unsigned long)file;
@@ -711,7 +713,7 @@ static int wdfs_read(
 
 	struct open_file *file = (struct open_file*)(uintptr_t)fi->fh;
 
-	int ret = pread(file->fh, buf, size, offset);
+	int ret = pread(file->fd, buf, size, offset);
 	if (ret < 0) {
 		fprintf(stderr, "## pread() error: %d\n", ret);
 		return -EIO;
@@ -737,7 +739,7 @@ static int wdfs_write(
 
 	struct open_file *file = (struct open_file*)(uintptr_t)fi->fh;
 
-	int ret = pwrite(file->fh, buf, size, offset);
+	int ret = pwrite(file->fd, buf, size, offset);
 	if (ret < 0) {
 		fprintf(stderr, "## pwrite() error: %d\n", ret);
 		return -EIO;
@@ -768,7 +770,7 @@ static int wdfs_release(const char *localpath, struct fuse_file_info *fi)
 
 	/* put the file only to the server, if it was modified. */
 	if (file->modified == true) 	{
-		if (ne_put(session, remotepath, file->fh)) {
+		if (ne_put(session, remotepath, file->fd)) {
 			fprintf(stderr, "## PUT error: %s\n", ne_get_error(session));
 			FREE(remotepath);
 			return -EIO;
@@ -800,7 +802,7 @@ static int wdfs_release(const char *localpath, struct fuse_file_info *fi)
 	}
 
 	/* close filehandle and free memory */
-// 	close(file->fh); // TODO FIXME use cache
+// 	close(file->fd);//TODO FIXME refference count
 	FREE(file);
 	FREE(remotepath);
 
@@ -917,7 +919,7 @@ static int wdfs_ftruncate(
 
 	struct open_file *file = (struct open_file*)(uintptr_t)fi->fh;
 
-	int ret = ftruncate(file->fh, size);
+	int ret = ftruncate(file->fd, size);
 	if (ret < 0) {
 		fprintf(stderr, "## ftruncate() error: %d\n", ret);
 		FREE(remotepath);
@@ -1139,10 +1141,17 @@ int wdfs_chmod(const char *localpath, mode_t mode)
         {NULL}
     };
     
+    //TODO FIXME ETag MUST be everytime
+    webdav_context_t ctx{session, cache.get(remotepath.get()).resource};  
+    
+    hook_helper_t hooker(session, &ctx);
+    
     if (ne_proppatch(session, remotepath.get(), ops)) {
         fprintf(stderr, "PROPPATCH error: %s\n", ne_get_error(session));
         return -ENOENT;
     }
+    
+    cache.update(remotepath.get(), ctx.resource);
     
 	return 0;
 }

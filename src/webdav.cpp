@@ -443,7 +443,9 @@ void unlock_all_files()
 }
 
 inline void fill_resource(webdav_resource_t* resource, ne_request* request) {
-    resource->etag = normalize_etag(ne_get_response_header(request, "ETag"));
+    const char *etag = ne_get_response_header(request, "ETag");
+    if (etag) 
+        resource->etag = normalize_etag(etag);
 
     const char *lastmodified = ne_get_response_header(request, "Last-Modified");
     if (!lastmodified) lastmodified = ne_get_response_header(request, "Date");
@@ -457,6 +459,26 @@ inline void fill_resource(webdav_resource_t* resource, ne_request* request) {
     resource->stat.st_size = (contentlength)
         ? atoll(contentlength)
         : 0;
+}
+
+void create_request_handler(ne_request *req, void *userdata, const char *method, const char *requri)
+{
+    webdav_context_t* ctx = reinterpret_cast<webdav_context_t*>(userdata);
+    
+    if (!ctx->resource.etag) {
+        //there is no e tag - MUST no resource on server
+        //do nothing(304) if ANY version already on server
+        ne_add_request_header(req, "If-None-Match", "*"); 
+    }
+    else {
+        if (ctx->resource.etag->empty()) {
+            //etag facility disabled
+        }
+        else {
+            //do nothing(304) if etag mismatch
+            ne_add_request_header(req, "If-Match", ctx->resource.etag->c_str());
+        }
+    }
 }
 
 int post_send_handler(ne_request* request, void* userdata, const ne_status* status)

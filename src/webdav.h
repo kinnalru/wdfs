@@ -13,6 +13,7 @@ int lockfile(const char *remotepath, const int timeout);
 int unlockfile(const char *remotepath);
 void unlock_all_files();
 
+void create_request_handler(ne_request *req, void *userdata, const char *method, const char *requri);
 int post_send_handler(ne_request *req, void *userdata, const ne_status *status);
 int get_head(ne_session *session, const std::string& path, webdav_resource_t* resource);
 
@@ -23,13 +24,13 @@ struct hook_helper_t {
     hook_helper_t(ne_session* s, webdav_context_t* c) : session(s), ctx(c) {
         assert(session);
         assert(ctx);
-//         ne_hook_create_request(session, create_request_handler, ctx);
+        ne_hook_create_request(session, create_request_handler, ctx);
         ne_hook_post_send(session, post_send_handler, ctx);
     }
     
     ~hook_helper_t() {
         ne_unhook_post_send(session, post_send_handler, ctx);        
-//         ne_unhook_create_request(session, create_request_handler, ctx);
+        ne_unhook_create_request(session, create_request_handler, ctx);
     }
 };
 

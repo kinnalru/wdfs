@@ -5,6 +5,9 @@
 #include <sys/stat.h>
 #include <string>
 
+//#include <optional>
+#include <boost/optional.hpp>
+
 typedef struct ne_session_s ne_session;
 typedef std::string etag_t;
 
@@ -17,7 +20,7 @@ enum {
 };
 
 struct webdav_resource_t {
-    etag_t etag;
+    boost::optional<etag_t> etag;
     struct stat stat;
 };
 

@@ -14,6 +14,9 @@ int cache_get_item(struct stat *stat, const char *remotepath);
 
 
 struct cached_file_t {
+    cached_file_t() : fd (-1) {};
+    cached_file_t(const webdav_resource_t& r, int f) : resource(r), fd(f) {};
+    
     webdav_resource_t resource;
     int fd;
 };
@@ -28,6 +31,7 @@ public:
     cached_file_t get(const std::string& path);
     
     void update(const std::string& path, const cached_file_t& file);
+    void update(const std::string& path, const webdav_resource_t& resource);
     
 private:
     cache_t cache_;
