@@ -399,11 +399,15 @@ static void wdfs_getattr_propfind_callback(
 	if (wdfs.debug == true)
 		print_debug_infos(__func__, remotepath);
 
+	struct stat *stat = reinterpret_cast<struct stat*>(userdata);
+	memset(stat, 0, sizeof(struct stat));
+
 	assert(remotepath);
 
     attr_cache_t::item_p attr(new attr_cache_t::item);
 	set_stat(attr->resource.etag, attr->resource.stat, results);
     attr_cache.add(remotepath, attr);
+    *stat = attr->resource.stat;
 
 #if NEON_VERSION >= 26
 	FREE(remotepath);
@@ -447,8 +451,9 @@ static int wdfs_getattr(const char *localpath, struct stat *stat)
 	if (remotepath == NULL)
 		return -ENOMEM;
 
+    attr_cache_t::item_p attr = attr_cache.get(remotepath);
 	/* stat not found in the cache? perform a propfind to get stat! */
-	if (!attr_cache.get(remotepath)) {
+	if (!attr) {
 		int ret = ne_simple_propfind(
 			session, remotepath, NE_DEPTH_ZERO, &prop_names[0],
 			wdfs_getattr_propfind_callback, stat);
@@ -466,7 +471,10 @@ static int wdfs_getattr(const char *localpath, struct stat *stat)
 			FREE(remotepath);
 			return -ENOENT;
 		}
-	}
+	} 
+	else {
+        *stat = attr->resource.stat;
+    }
 
 	FREE(remotepath);
 	return 0;
@@ -643,7 +651,7 @@ static int wdfs_open(const char *localpath, struct fuse_file_info *fi)
 	//TODO FIXME Etag must be everytime
 	file_cache_t::item_p c_file = file_cache.get(remotepath.get());
     if (!c_file) 
-         return -ENOENT;
+         c_file.reset(new file_cache_t::item);
     
     if (resource.etag && !resource.etag->empty()) {
         if (resource.etag == c_file->resource.etag) {
@@ -1124,7 +1132,7 @@ int wdfs_chmod(const char *localpath, mode_t mode)
 	if (wdfs.debug == true)
 		print_debug_infos(__func__, localpath);
 
-    std::auto_ptr<char> remotepath(get_remotepath(localpath));
+    std::unique_ptr<char> remotepath(get_remotepath(localpath));
     const std::string mode_str = std::to_string(mode);
     const std::string exec_str = (mode & S_IXUSR || mode & S_IXGRP || mode &S_IXOTH) ? "T" : "F";
     

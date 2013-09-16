@@ -36,21 +36,37 @@ public:
     typedef Item item;
     typedef std::shared_ptr<Item> item_p;
 
-    virtual item_p get(const std::string& path) const {
-        typename data_t::const_iterator it = cache_.find(path);
-        return (it != cache_.end())
-            ? item_p(new item(it->second))
-            : item_p();
+    std::string normalize(const std::string& path_raw) const {
+        std::unique_ptr<char> path(unify_path(path_raw.c_str(), UNESCAPE));
+        return std::string(path.get());
     }
     
-    virtual void add(const std::string& path, const item_p& v) {
-        if (v.get())
+    virtual item_p get(const std::string& path_raw) const {
+        const std::string path = normalize(path_raw);
+        typename data_t::const_iterator it = cache_.find(path);
+        if (it != cache_.end()) {
+            std::cerr << "cache +hit+ for path:" << path << std::endl;
+            return item_p(new item(it->second));
+        }
+        else {
+            std::cerr << "cache _miss_ for path:" << path << std::endl;
+            return item_p();
+        }
+    }
+    
+    virtual void add(const std::string& path_raw, const item_p& v) {
+        const std::string path = normalize(path_raw);
+        if (v.get()) {
+            std::cerr << "cache +added+ for path:" << path << std::endl;
             cache_[path] = *v;
+        }
         else
             remove(path);
     }
     
-    virtual void remove(const std::string& path) {
+    virtual void remove(const std::string& path_raw) {
+        const std::string path = normalize(path_raw);
+        std::cerr << "cache _removed_ for path:" << path << std::endl;
         cache_.erase(path);
     }
     
