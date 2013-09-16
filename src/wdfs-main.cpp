@@ -390,7 +390,7 @@ static void set_stat(struct stat* stat, const ne_prop_result_set *results)
 	if (wdfs.debug == true)
 		print_debug_infos(__func__, "");
 
-	const char *resourcetype, *contentlength, *lastmodified, *creationdate, *executable, *mode;
+	const char *resourcetype, *contentlength, *lastmodified, *creationdate, *executable, *modestr;
 	assert(stat && results);
 	memset(stat, 0, sizeof(struct stat));
 
@@ -400,20 +400,23 @@ static void set_stat(struct stat* stat, const ne_prop_result_set *results)
 	lastmodified	= get_helper(results, MODIFIED);
 	creationdate	= get_helper(results, CREATION);
 	executable	    = get_helper(results, EXECUTE);
-	mode	        = get_helper(results, PERMISSIONS);
+	modestr	        = get_helper(results, PERMISSIONS);
+    
+    int mode = 0;
 
 	/* webdav collection == directory entry */
 	if (resourcetype != NULL && !strstr("<collection", resourcetype)) {
 		/* "DT_DIR << 12" equals "S_IFDIR" */
-		stat->st_mode = S_IFDIR | 0777;
+        mode = (modestr) ? atoi(modestr) : 0777;
+        mode |= S_IFDIR;
 		stat->st_size = 4096;
 	} else {
-		stat->st_mode = S_IFREG | 0666;
-		if (contentlength != NULL)
-			stat->st_size = atoll(contentlength);
-		else
-			stat->st_size = 0;
+        mode = (modestr) ? atoi(modestr) : 0666;
+        mode |= S_IFREG;
+        stat->st_size = (contentlength) ? atoll(contentlength) : 0;
 	}
+	
+    stat->st_mode = mode;
 
 	stat->st_nlink = 1;
 	stat->st_atime = time(NULL);
@@ -434,8 +437,6 @@ static void set_stat(struct stat* stat, const ne_prop_result_set *results)
 	/* no need to set a restrict mode, because fuse filesystems can
 	 * only be accessed by the user that mounted the filesystem.  */
 	stat->st_mode &= ~umask(0);
-	if (mode != NULL)
-		stat->st_mode = atoi(mode);
 	stat->st_uid = getuid();
 	stat->st_gid = getgid();
 }
