@@ -19,11 +19,25 @@ enum {
     LEAVESLASH = 0x2
 };
 
+#define wrap_stat_field(field, type, object) \
+    type field() const {return object.st_##field;}; \
+    bool has_##field() const {return object.st_##field != 0;}; \
+    void update_##field(type f) {if (f) object.st_##field = f;};
+    
+    
+
+#define test(field, type) \
+    type field() const {};
+    
 struct webdav_resource_t {
     
     webdav_resource_t() {
         memset(&stat, 0, sizeof(struct stat));
     };
+    
+    wrap_stat_field(mtime, time_t, stat);
+    wrap_stat_field(size, off_t, stat);
+    
     
     etag_t etag;
     struct stat stat;

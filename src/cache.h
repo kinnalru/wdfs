@@ -13,11 +13,6 @@
 // void cache_delete_item(const char *remotepath);
 // int cache_get_item(struct stat *stat, const char *remotepath);
 
-struct cached_attr_t {
-    webdav_resource_t resource;  
-};
-
-
 struct cached_file_t {
     cached_file_t() : fd (-1) {};
     cached_file_t(const webdav_resource_t& r, int f) : resource(r), fd(f) {};
@@ -34,7 +29,7 @@ protected:
     
 public:
     typedef Item item;
-    typedef std::shared_ptr<Item> item_p;
+    typedef std::unique_ptr<Item> item_p;
 
     std::string normalize(const std::string& path_raw) const {
         std::unique_ptr<char> path(unify_path(path_raw.c_str(), UNESCAPE));
@@ -54,14 +49,10 @@ public:
         }
     }
     
-    virtual void add(const std::string& path_raw, const item_p& v) {
+    virtual void add(const std::string& path_raw, const item& v) {
         const std::string path = normalize(path_raw);
-        if (v.get()) {
-            std::cerr << "cache +added+ for path:" << path << std::endl;
-            cache_[path] = *v;
-        }
-        else
-            remove(path);
+        std::cerr << "cache +added+ for path:" << path << std::endl;
+        cache_[path] = v;
     }
     
     virtual void remove(const std::string& path_raw) {
@@ -79,10 +70,6 @@ class file_cache_t : public cache_t<cached_file_t> {
 public:
     using cache_t<cached_file_t>::add;
     void add(const std::string& path, const webdav_resource_t& resource);
-};
-
-class attr_cache_t : public cache_t<cached_attr_t> {
-
 };
 
 
