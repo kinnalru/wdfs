@@ -255,23 +255,9 @@ int cache_get_item(struct stat *stat, const char *remotepath)
 }
 
 
-cached_file_t file_cache_t::get(const std::string& path)
+void file_cache_t::add(const std::string& path, const webdav_resource_t& resource)
 {
-    static const cached_file_t empty = cached_file_t();
-    
-    cache_t::iterator it = cache_.find(path);
-    return (it != cache_.end()) ? it->second : empty;
-}
-
-
-void file_cache_t::update(const std::string& path, const cached_file_t& file)
-{
-    cache_[path] = file;
-}
-
-void file_cache_t::update(const std::string& path, const webdav_resource_t& resource)
-{
-    cache_t::iterator it = cache_.find(path);
+    data_t::iterator it = cache_.find(path);
     if (it != cache_.end()) {
         it->second.resource.etag = resource.etag;
         if (resource.stat.st_mtime)
@@ -281,18 +267,5 @@ void file_cache_t::update(const std::string& path, const webdav_resource_t& reso
             it->second.resource.stat.st_size = resource.stat.st_size;
     }
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 

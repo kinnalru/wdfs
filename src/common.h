@@ -9,7 +9,7 @@
 #include <boost/optional.hpp>
 
 typedef struct ne_session_s ne_session;
-typedef std::string etag_t;
+typedef boost::optional<std::string> etag_t;
 
 /* used as mode for unify_path() */
 enum {
@@ -20,7 +20,12 @@ enum {
 };
 
 struct webdav_resource_t {
-    boost::optional<etag_t> etag;
+    
+    webdav_resource_t() {
+        memset(&stat, 0, sizeof(struct stat));
+    };
+    
+    etag_t etag;
     struct stat stat;
 };
 

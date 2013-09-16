@@ -56,7 +56,8 @@
 #define ADVANCED_LOCK 2
 #define ETERNITY_LOCK 3
 
-file_cache_t cache;
+file_cache_t file_cache;
+attr_cache_t attr_cache;
 
 static void print_help();
 static int call_fuse_main(struct fuse_args *args);
@@ -285,15 +286,14 @@ const char* get_helper(const ne_prop_result_set *results, field_e field) {
 }
 
 /* evaluates the propfind result set and sets the file's attributes (stat) */
-static void set_stat(struct stat* stat, const ne_prop_result_set *results)
+static void set_stat(etag_t& etag, struct stat& stat, const ne_prop_result_set *results)
 {
 	if (wdfs.debug == true)
 		print_debug_infos(__func__, "");
 
-	const char *resourcetype, *contentlength, *lastmodified, *creationdate, *executable, *modestr;
+	const char *resourcetype, *contentlength, *lastmodified, *creationdate, *executable, *modestr, *etagstr;
     
-	assert(stat && results);
-	memset(stat, 0, sizeof(struct stat));
+	assert(results);
 
 	/* get the values from the propfind result set */
 	resourcetype	= get_helper(results, TYPE);
@@ -302,6 +302,7 @@ static void set_stat(struct stat* stat, const ne_prop_result_set *results)
 	creationdate	= get_helper(results, CREATION);
 	executable	    = get_helper(results, EXECUTE);
 	modestr	        = get_helper(results, PERMISSIONS);
+    etagstr         = get_helper(results, ETAG);
     
     int mode = 0;
 
@@ -310,36 +311,38 @@ static void set_stat(struct stat* stat, const ne_prop_result_set *results)
 		/* "DT_DIR << 12" equals "S_IFDIR" */
         mode = (modestr) ? atoi(modestr) : 0777;
         mode |= S_IFDIR;
-		stat->st_size = 4096;
+		stat.st_size = 4096;
 	} else {
         mode = (modestr) ? atoi(modestr) : 0666;
         mode |= S_IFREG;
-        stat->st_size = (contentlength) ? atoll(contentlength) : 0;
+        stat.st_size = (contentlength) ? atoll(contentlength) : 0;
 	}
 	
-    stat->st_mode = mode;
+    stat.st_mode = mode;
 
-	stat->st_nlink = 1;
-	stat->st_atime = time(NULL);
+	stat.st_nlink = 1;
+	stat.st_atime = time(NULL);
 
 	if (lastmodified != NULL)
-		stat->st_mtime = ne_rfc1123_parse(lastmodified);
+		stat.st_mtime = ne_rfc1123_parse(lastmodified);
 	else
-		stat->st_mtime = 0;
+		stat.st_mtime = 0;
 
 	if (creationdate != NULL)
-		stat->st_ctime = ne_iso8601_parse(creationdate);
+		stat.st_ctime = ne_iso8601_parse(creationdate);
 	else
-		stat->st_ctime = 0;
+		stat.st_ctime = 0;
 
 	/* calculate number of 512 byte blocks */
-	stat->st_blocks	= (stat->st_size + 511) / 512;
+	stat.st_blocks	= (stat.st_size + 511) / 512;
 
 	/* no need to set a restrict mode, because fuse filesystems can
 	 * only be accessed by the user that mounted the filesystem.  */
-	stat->st_mode &= ~umask(0);
-	stat->st_uid = getuid();
-	stat->st_gid = getgid();
+	stat.st_mode &= ~umask(0);
+	stat.st_uid = getuid();
+	stat.st_gid = getgid();
+    
+    if (etagstr) etag.reset(etagstr);
 }
 
 
@@ -396,13 +399,11 @@ static void wdfs_getattr_propfind_callback(
 	if (wdfs.debug == true)
 		print_debug_infos(__func__, remotepath);
 
-	struct stat *stat = (struct stat*)userdata;
-	memset(stat, 0, sizeof(struct stat));
+	assert(remotepath);
 
-	assert(stat && remotepath);
-
-	set_stat(stat, results);
-	cache_add_item(stat, remotepath);
+    attr_cache_t::item_p attr(new attr_cache_t::item);
+	set_stat(attr->resource.etag, attr->resource.stat, results);
+    attr_cache.add(remotepath, attr);
 
 #if NEON_VERSION >= 26
 	FREE(remotepath);
@@ -447,7 +448,7 @@ static int wdfs_getattr(const char *localpath, struct stat *stat)
 		return -ENOMEM;
 
 	/* stat not found in the cache? perform a propfind to get stat! */
-	if (cache_get_item(stat, remotepath)) {
+	if (!attr_cache.get(remotepath)) {
 		int ret = ne_simple_propfind(
 			session, remotepath, NE_DEPTH_ZERO, &prop_names[0],
 			wdfs_getattr_propfind_callback, stat);
@@ -516,14 +517,13 @@ static void wdfs_readdir_propfind_callback(
 	/* set this file's attributes. the "ne_prop_result_set *results" contains
 	 * the file attributes of all files of this collection (directory). this 
 	 * performs better then single requests for each file in getattr().  */
-	struct stat stat;
-	set_stat(&stat, results);
-
-	/* add this file's attributes to the cache */
-	cache_add_item(&stat, remotepath1);
-
+    
+    attr_cache_t::item_p attr(new attr_cache_t::item);
+    set_stat(attr->resource.etag, attr->resource.stat, results);
+    attr_cache.add(remotepath, attr);
+    
 	/* add directory entry */
-	if (item_data->filler(item_data->buf, filename, &stat, 0))
+	if (item_data->filler(item_data->buf, filename, &attr->resource.stat, 0))
 		fprintf(stderr, "## filler() error in %s()!\n", __func__);
 
 	free_chars(&remotepath, &remotepath1, &remotepath2, NULL);
@@ -641,15 +641,17 @@ static int wdfs_open(const char *localpath, struct fuse_file_info *fi)
     }
 	
 	//TODO FIXME Etag must be everytime
-	cached_file_t c_file = cache.get(remotepath.get());
+	file_cache_t::item_p c_file = file_cache.get(remotepath.get());
+    if (!c_file) 
+         return -ENOENT;
     
     if (resource.etag && !resource.etag->empty()) {
-        if (resource.etag == c_file.resource.etag) {
-            file->fd = c_file.fd;
+        if (resource.etag == c_file->resource.etag) {
+            file->fd = c_file->fd;
         }
     }
-    else if(resource.stat.st_mtime && (resource.stat.st_mtime == c_file.resource.stat.st_mtime)) {
-        file->fd = c_file.fd;
+    else if(resource.stat.st_mtime && (resource.stat.st_mtime == c_file->resource.stat.st_mtime)) {
+        file->fd = c_file->fd;
     }
     
     if (file->fd == -1) {
@@ -675,7 +677,7 @@ static int wdfs_open(const char *localpath, struct fuse_file_info *fi)
         }
 
         webdav_context_t ctx{session};  
-        ctx.resource.etag.reset(etag_t()); //disable etag facility
+        ctx.resource.etag.reset(""); //disable etag facility
         hook_helper_t hooker(session, &ctx);
         
         /* GET the data to the filehandle even if the file is opened O_WRONLY,
@@ -685,7 +687,10 @@ static int wdfs_open(const char *localpath, struct fuse_file_info *fi)
             fprintf(stderr, "## GET error: %s\n", ne_get_error(session));
             return -ENOENT;        
         }
-        cache.update(remotepath.get(), cached_file_t(ctx.resource, file->fd));
+        
+        c_file->resource = ctx.resource;
+        c_file->fd = file->fd;
+        file_cache.add(remotepath.get(), c_file);
     }
 
     
@@ -777,7 +782,7 @@ static int wdfs_release(const char *localpath, struct fuse_file_info *fi)
 
 		/* attributes for this file are no longer up to date.
 		 * so remove it from cache. */
-		cache_delete_item(remotepath);
+        attr_cache.remove(remotepath);
 
 		/* unlock if locking is enabled and mode is ADVANCED_LOCK, because data
 		 * has been read and writen and so now it's time to remove the lock. */
@@ -884,7 +889,7 @@ static int wdfs_truncate(const char *localpath, off_t size)
 	}
 
 	/* stat for this file is no longer up to date. remove it from the cache. */
-	cache_delete_item(remotepath);
+// 	cache_delete_item(remotepath); //TODO FIXME
 
 	close(fh_in);
 	close(fh_out);
@@ -927,8 +932,8 @@ static int wdfs_ftruncate(
 	file->modified = true;
 
 	/* update the cache item of the ftruncate()d file */
-	struct stat stat;
-	if (cache_get_item(&stat, remotepath) < 0) {
+    attr_cache_t::item_p attr = attr_cache.get(remotepath);
+	if (!attr) {
 		fprintf(stderr,
 			"## cache_get_item() error: item '%s' not found!\n", remotepath);
 		FREE(remotepath);
@@ -936,13 +941,13 @@ static int wdfs_ftruncate(
 	}
 
 	/* set the new size after the ftruncate() call */
-	stat.st_size = size;
+	attr->resource.stat.st_size = size;
 
 	/* calculate number of 512 byte blocks */
-	stat.st_blocks	= (stat.st_size + 511) / 512;
+	attr->resource.stat.st_blocks	= (attr->resource.stat.st_size + 511) / 512;
 
 	/* update the cache */
-	cache_add_item(&stat, remotepath);
+	attr_cache.add(remotepath, attr);
 
 	FREE(remotepath);
 
@@ -1048,7 +1053,7 @@ static int wdfs_unlink(const char *localpath)
 
 	/* file successfully deleted! remove it also from the cache. */
 	if (ret == 0) {
-		cache_delete_item(remotepath);
+		attr_cache.remove(remotepath);
 	/* return more specific error message in case of permission problems */
 	} else if (!strcmp(ne_get_error(session), "403 Forbidden")) {
 		ret = -EPERM;
@@ -1102,7 +1107,7 @@ static int wdfs_rename(const char *localpath_src, const char *localpath_dest)
 	if (ret == 0) {
 		/* rename was successful and the source file no longer exists.
 		 * hence, remove it from the cache. */
-		cache_delete_item(remotepath_src);
+		attr_cache.remove(remotepath_src);
 	} else {
 		fprintf(stderr, "## MOVE error: %s\n", ne_get_error(session));
 		ret = -EIO;
@@ -1138,7 +1143,8 @@ int wdfs_chmod(const char *localpath, mode_t mode)
     };
     
     //TODO FIXME ETag MUST be everytime
-    webdav_context_t ctx{session, cache.get(remotepath.get()).resource};  
+    attr_cache_t::item_p attr = attr_cache.get(remotepath.get());
+    webdav_context_t ctx{session, attr->resource};  
     
     hook_helper_t hooker(session, &ctx);
     
@@ -1147,7 +1153,8 @@ int wdfs_chmod(const char *localpath, mode_t mode)
         return -ENOENT;
     }
     
-    cache.update(remotepath.get(), ctx.resource);
+    attr->resource = ctx.resource;
+    attr_cache.add(remotepath.get(), attr);
     
 	return 0;
 }
@@ -1203,7 +1210,6 @@ static void wdfs_destroy(void*)
 		fprintf(stderr, ">> freeing globaly used memory\n");
 
 	/* free globaly used memory */
-	cache_destroy();
 	unlock_all_files();
 	ne_session_destroy(session);
 	FREE(remotepath_basedir);
@@ -1359,8 +1365,6 @@ int main(int argc, char *argv[])
 			goto cleanup;
 		}
 	}
-
-	cache_initialize();
 
 	/* finally call fuse */
 	status_program_exec = call_fuse_main(&options);
