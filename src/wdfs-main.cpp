@@ -290,11 +290,8 @@ static void set_stat(struct stat* stat, const ne_prop_result_set *results)
 	if (wdfs.debug == true)
 		print_debug_infos(__func__, "");
 
-<<<<<<< HEAD
 	const char *resourcetype, *contentlength, *lastmodified, *creationdate, *executable, *modestr;
-=======
-	const char *resourcetype, *contentlength, *lastmodified, *creationdate, *mode;
->>>>>>> simple file cache implemented.
+    
 	assert(stat && results);
 	memset(stat, 0, sizeof(struct stat));
 
@@ -633,8 +630,7 @@ static int wdfs_open(const char *localpath, struct fuse_file_info *fi)
 	else
 		remotepath.reset(get_remotepath(localpath));
 
-	if (remotepath == NULL) {
-		FREE(file);
+	if (!remotepath.get()) {
 		return -ENOMEM;
 	}
 

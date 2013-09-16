@@ -12,6 +12,10 @@ void cache_add_item(struct stat *stat, const char *remotepath);
 void cache_delete_item(const char *remotepath);
 int cache_get_item(struct stat *stat, const char *remotepath);
 
+struct cached_attr_t {
+    webdav_resource_t resource;  
+};
+
 
 struct cached_file_t {
     cached_file_t() : fd (-1) {};
@@ -24,14 +28,25 @@ struct cached_file_t {
 class file_cache_t {
 
 public:
-    
-    typedef std::string etag_t;
     typedef std::map<std::string, cached_file_t> cache_t;
     
     cached_file_t get(const std::string& path);
     
     void update(const std::string& path, const cached_file_t& file);
     void update(const std::string& path, const webdav_resource_t& resource);
+    
+private:
+    cache_t cache_;
+};
+
+class attr_cache_t {
+    
+public:
+    typedef std::map<std::string, cached_attr_t> cache_t;
+    
+    cached_attr_t get(const std::string& path);
+    
+    void update(const std::string& path, const cached_attr_t& attr);
     
 private:
     cache_t cache_;
