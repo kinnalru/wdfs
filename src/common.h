@@ -7,6 +7,8 @@
 #include <string>
 
 #include <boost/optional.hpp>
+#include <boost/serialization/map.hpp>
+#include <boost/serialization/optional.hpp>
 #include <boost/archive/text_oarchive.hpp>
 #include <boost/archive/text_iarchive.hpp>
 
@@ -21,26 +23,22 @@ enum {
     LEAVESLASH = 0x2
 };
 
-#define wrap_stat_field(field, type, object) \
-    type field() const {return object.st_##field;}; \
-    bool has_##field() const {return object.st_##field != 0;}; \
-    void update_##field(type f) {if (f) object.st_##field = f;};
-    
+
 template <typename T>
 inline std::string to_string(const T& rawdata) {
     const char* data = static_cast<const char*>(static_cast<const void*>(&rawdata));
-    std::string result;
-    for (unsigned int i = 0; i < sizeof(T); ++i) {
-        result += std::to_string(data[i]) + '_';
-    }
-    return result;
+    std::string strdata;
+    std::for_each(data, data + sizeof(T), [&strdata] (char c) {
+        strdata += std::to_string(c) + '_';
+    });
+    return strdata;
 }
 
 template <typename T>
 std::unique_ptr<T> from_string(const std::string& strdata) {
     std::vector<char> data;
     size_t pos = 0;
-    while(pos < strdata.size()) {
+    while (pos < strdata.size()) {
         size_t finded = strdata.find('_', pos);
         if (finded == std::string::npos || finded == strdata.size()) break;
         
@@ -48,26 +46,35 @@ std::unique_ptr<T> from_string(const std::string& strdata) {
         data.push_back(atoi(number.c_str()));
         pos = finded + 1;
     }
-    std::cerr << "strdata:" << strdata << std::endl;
-    std::cerr << "sizeof:" << sizeof(T) << std::endl;
-    std::cerr << "data:" << data.size() << std::endl;
-    assert(data.size() == sizeof(T));
-    std::unique_ptr<T> rawdata(new T);
-    memcpy(rawdata.get(), &data[0], sizeof(T));
+    std::unique_ptr<T> rawdata;
+    if (data.size() == sizeof(T)) {
+        rawdata.reset(new T);
+        memcpy(rawdata.get(), &data[0], sizeof(T));
+    }
+
     return rawdata;
 }
+
+#define wrap_stat_field(field, type, object) \
+    type field() const {return object.st_##field;}; \
+    bool has_##field() const {return object.st_##field != 0;}; \
+    void update_##field(type f) {if (f) object.st_##field = f;};
     
-struct webdav_resource_t {
-private:
+    
+class webdav_resource_t {
     friend class boost::serialization::access;
     
     template<class Archive>
     void serialize(Archive & ar, const unsigned int version)
     {
-        ar & degrees;
-        ar & minutes;
-        ar & seconds;
+        ar & etag;
+        std::string statstr = to_string(stat);
+        ar & statstr;
+        if (auto startptr = from_string<struct stat>(statstr)) {
+            stat = *startptr;
+        }
     }
+    
 public:
     webdav_resource_t() {
         memset(&stat, 0, sizeof(struct stat));
@@ -83,33 +90,9 @@ public:
         update_size(other.size());
     }
     
-    friend std::ostream& operator<<(std::ostream& os, const webdav_resource_t& resource);
-    friend std::istream& operator>>(std::istream& is, webdav_resource_t& resource);
-    
     etag_t etag;
     struct stat stat;
 };
-
-inline std::ostream& operator<<(std::ostream& os, const webdav_resource_t& resource)
-{
-    os << ((resource.etag) ? resource.etag.get() : "") << std::endl;
-    os << to_string(resource.stat) << std::endl;
-    return os;
-}
-
-inline std::istream& operator>>(std::istream& is, webdav_resource_t& resource)
-{
-    std::string etag;
-    is >> std::noskipws;
-    is >> etag;
-    is >> std::skipws;
-    std::cerr << "ETAG:" << etag << std::endl;
-    resource.etag.reset(etag);
-    std::string stat;
-    is >> stat;
-    resource.stat = *from_string<struct stat>(stat);
-    return is;
-}
 
 struct webdav_context_t {
     ne_session* session;

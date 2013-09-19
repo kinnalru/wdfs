@@ -255,17 +255,3 @@ int cache_get_item(struct stat *stat, const char *remotepath)
 }
 
 
-void file_cache_t::add(const std::string& path, const webdav_resource_t& resource)
-{
-    data_t::iterator it = cache_.find(path);
-    if (it != cache_.end()) {
-        it->second.resource.etag = resource.etag;
-        if (resource.stat.st_mtime)
-            it->second.resource.stat.st_mtime = resource.stat.st_mtime;
-        
-        if (resource.stat.st_size)
-            it->second.resource.stat.st_size = resource.stat.st_size;
-    }
-}
-
-
