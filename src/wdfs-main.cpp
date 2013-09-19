@@ -37,6 +37,7 @@
 #include <vector>
 #include <string>
 #include <iostream>
+#include <fstream>
 
 #include "wdfs-main.h"
 #include "webdav.h"
@@ -1191,7 +1192,11 @@ static int wdfs_statfs(const char *localpath, struct statvfs *buf)
 {
     wdfs_dbg("%s()\n", __func__);
     
+    std::ifstream stream("/tmp/123");
+    stream >> std::skipws;
+    stream >> file_cache;
     
+    std::cerr << "cache loaded:" << file_cache.cache_.size() << std::endl;
     
 	return NULL;
 }
@@ -1203,6 +1208,11 @@ static void wdfs_destroy(void*)
 {
     wdfs_dbg("%s()\n", __func__);
 
+    std::ofstream stream("/tmp/123");
+    stream << file_cache;
+    
+    std::cerr << "Dumping cache:" << file_cache.cache_.size() << std::endl;
+    
 	/* free globaly used memory */
 	unlock_all_files();
 	ne_session_destroy(session);
@@ -1288,6 +1298,10 @@ static int call_fuse_main(struct fuse_args *args)
 #endif
 }
 
+struct test_t {
+    int a;
+    double b;
+};
 
 /* the main method does the option parsing using fuse_opt_parse(), establishes
  * the connection to the webdav resource and finally calls main_fuse(). */
