@@ -61,12 +61,4 @@ extern struct wdfs_conf wdfs;
 extern const char *project_name;
 extern char *remotepath_basedir;
 
-/* used by wdfs_readdir() and by svn.h/svn.c to add files to requested 
- * directories using fuse's filler() method. */
-struct dir_item {
-	void *buf;
-	fuse_fill_dir_t filler;
-	std::unique_ptr<char> remotepath;
-};
-
 #endif /*WDFSMAIN_H_*/

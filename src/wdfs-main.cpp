@@ -195,8 +195,16 @@ static int wdfs_opt_proc(
  * if connected to the root directory (http://server/) it will be set to "". */
 char *remotepath_basedir;
 
+struct readdir_ctx_t {
+    void *buf;
+    fuse_fill_dir_t filler;
+    std::unique_ptr<char> remotepath;
+};
+
 /* infos about an open file. used by open(), read(), write() and release()   */
-struct open_file {
+struct file_t {
+    file_t() : fd(-1), modified(false) {}
+    
 	int fd;	/* this file's filehandle                            */
 	bool modified;	/* set true if the filehandle's content is modified  */
 };
@@ -405,7 +413,6 @@ static int wdfs_getattr(const char *localpath, struct stat *stat)
     auto remotepath(get_remotepath(localpath));
     if (!remotepath) return -ENOMEM;
 
-    
     if (auto cached_stat = cache.stat(remotepath.get())) {
         *stat = *cached_stat;
     } 
@@ -431,7 +438,6 @@ static int wdfs_getattr(const char *localpath, struct stat *stat)
 	return 0;
 }
 
-
 /* this method is called by ne_simple_propfind() from wdfs_readdir() for each 
  * member (file) of the requested collection. this method extracts the file's
  * attributes from the webdav response, adds it to the cache and calls the fuse
@@ -451,11 +457,11 @@ static void wdfs_readdir_propfind_callback(
 
     wdfs_dbg("%s(%s)\n", __func__, remotepath);      
 
-	struct dir_item *item_data = (struct dir_item*)userdata;
-	assert(item_data);
+	struct readdir_ctx_t *ctx = reinterpret_cast<readdir_ctx_t*>(userdata);
+	assert(ctx);
 
 	char *remotepath1 = unify_path(remotepath, UNESCAPE);
-	char *remotepath2 = unify_path(item_data->remotepath.get(), UNESCAPE);
+	char *remotepath2 = unify_path(ctx->remotepath.get(), UNESCAPE);
 	if (remotepath1 == NULL || remotepath2 == NULL) {
 		free_chars(&remotepath, &remotepath1, &remotepath2, NULL);
 		fprintf(stderr, "## fatal error: unify_path() returned NULL\n");
@@ -487,7 +493,7 @@ static void wdfs_readdir_propfind_callback(
     cache.update(remotepath, *cached_file);
     
 	/* add directory entry */
-	if (item_data->filler(item_data->buf, filename, &cached_file->resource.stat, 0))
+	if (ctx->filler(ctx->buf, filename, &cached_file->resource.stat, 0))
 		fprintf(stderr, "## filler() error in %s()!\n", __func__);
 
 	free_chars(&remotepath, &remotepath1, &remotepath2, NULL);
@@ -505,26 +511,25 @@ static int wdfs_readdir(
     wdfs_dbg("%s(%s)\n", __func__, localpath);      
 	assert(localpath && filler);
 
-	struct dir_item item_data = {
+	struct readdir_ctx_t ctx = {
         buf,
         filler,
         get_remotepath(localpath)
     };
 
-	if (item_data.remotepath == NULL)
-		return -ENOMEM;
+	if (!ctx.remotepath) return -ENOMEM;
 
 
 	int ret = ne_simple_propfind(
-		session, item_data.remotepath.get(), NE_DEPTH_ONE,
-		&prop_names[0], wdfs_readdir_propfind_callback, &item_data);
+		session, ctx.remotepath.get(), NE_DEPTH_ONE,
+		&prop_names[0], wdfs_readdir_propfind_callback, &ctx);
 	/* handle the redirect and retry the propfind with the redirect target */
 	if (ret == NE_REDIRECT && wdfs.redirect == true) {
-		if (handle_redirect(item_data.remotepath))
+		if (handle_redirect(ctx.remotepath))
 			return -ENOENT;
 		ret = ne_simple_propfind(
-			session, item_data.remotepath.get(), NE_DEPTH_ONE,
-			&prop_names[0], wdfs_readdir_propfind_callback, &item_data);
+			session, ctx.remotepath.get(), NE_DEPTH_ONE,
+			&prop_names[0], wdfs_readdir_propfind_callback, &ctx);
 	}
 	if (ret != NE_OK) {
 			fprintf(stderr, "## PROPFIND error in %s(): %s\n",
@@ -552,39 +557,51 @@ static int wdfs_open(const char *localpath, struct fuse_file_info *fi)
 
 	assert(localpath && fi);
 
-	struct open_file *file = g_new0(struct open_file, 1);
-    file->fd = -1;
-	file->modified = false;
+	std::unique_ptr<file_t> file(new file_t);
 
 	auto remotepath = get_remotepath(localpath);
 	if (!remotepath) return -ENOMEM;
 
-	webdav_resource_t resource;
-    
-    if (get_head(session, remotepath.get(), &resource)) {
-        return -ENOENT;
-    }
-	
-	//TODO FIXME Etag must be everytime
-	cache_t::item_p cached_file = cache.get(remotepath.get());
-    assert(cached_file);
-    
-    if (resource.etag && !resource.etag->empty()) {
-        if (resource.etag == cached_file->resource.etag) {
-            file->fd = cached_file->fd;
-            std::cerr << "cache hit by ETag" << std::endl;
+    webdav_resource_t resource_full; //resource from PROPFIND request
+	webdav_resource_t resource_new;
+    if (get_head(session, remotepath.get(), &resource_new)) return -ENOENT;
+
+    if (auto cached_file = cache.get(remotepath.get())) {
+        resource_full = cached_file->resource;
+        std::cerr << "full mode:" << resource_full.stat.st_mode << std::endl;
+        
+        if (resource_new.etag != cached_file->resource.etag) {
+            wdfs_pr("   -- ETag is diferent - invalidate cache\n");
+            cache.remove(remotepath.get());
+        }
+        else if (!resource_new.etag && resource_new.stat.st_mtime != cached_file->resource.stat.st_mtime) {
+            wdfs_pr("   -- There no ETag supported and modtiem different - invalidate cache\n");
+            cache.remove(remotepath.get());
+        }
+        else if (resource_new.stat.st_size != cached_file->resource.stat.st_size) {
+            wdfs_pr("   -- Filesize different - invalidate cache\n");
+            cache.remove(remotepath.get());
+        }
+        else if (cached_file->fd == -1) {
+            wdfs_pr("   -- There is no file in cache - remove cache record\n");
+            cache.remove(remotepath.get());
+        }
+        else if (resource_new.stat.st_mtime != cached_file->resource.stat.st_mtime) {
+            wdfs_pr("   ++ ETag and sizes are same but modtime different - update cache\n");
+            cached_file->resource.update_from(resource_new);
+            cache.update(remotepath.get(), *cached_file);
         }
     }
-    else if(resource.stat.st_mtime && (resource.stat.st_mtime == cached_file->resource.stat.st_mtime)) {
+
+    if (auto cached_file = cache.get(remotepath.get())) {
+        wdfs_pr("   ++ Filecache +hit+ no download needed\n");
+        std::cerr << "hit mode:" << cached_file->resource.stat.st_mode << std::endl;
         file->fd = cached_file->fd;
-        std::cerr << "cache hit by ModTime" << std::endl;
     }
-    
-    if (file->fd == -1) {
-        std::cerr << "no file in cache" << std::endl;
+    else {
+        wdfs_pr("   ++ Filecache +miss+ download file\n");
         file->fd = get_filehandle();
-        if (file->fd == -1)
-            return -EIO;
+        if (file->fd == -1) return -EIO;
         
         /* try to lock, if locking is enabled and file is not below svn_basedir. */
         if (wdfs.locking_mode != NO_LOCK) {
@@ -596,7 +613,6 @@ static int wdfs_open(const char *localpath, struct fuse_file_info *fi)
                         "## error: file %s is already locked. "
                         "allowing read-only (O_RDONLY) access!\n", remotepath.get());
                 } else {
-                    FREE(file);
                     return -EACCES;
                 }
             }
@@ -614,15 +630,17 @@ static int wdfs_open(const char *localpath, struct fuse_file_info *fi)
             return -ENOENT;        
         }
 
-        cached_file->fd = file->fd;
-        cached_file->resource.update_from(ctx.resource);
-        cache.update(remotepath.get(), *cached_file);
+        resource_full.update_from(resource_new);
+        resource_full.update_from(ctx.resource);
+        cached_file_t cached_file(resource_full, file->fd);
+        wdfs_pr("   ++ File downloaded successfuly\n");
+        cache.update(remotepath.get(), cached_file);
     }
 
     
 	/* save our "struct open_file" to the fuse filehandle
 	 * this looks like a dirty hack too me, but it's the fuse way... */
-	fi->fh = (unsigned long)file;
+	fi->fh = reinterpret_cast<uint64_t>(file.release());
 
 	return 0;
 }
@@ -634,17 +652,13 @@ static int wdfs_read(
 	off_t offset, struct fuse_file_info *fi)
 {
     wdfs_dbg("%s(%s)\n", __func__, localpath); 
-
 	assert(localpath && buf && fi);
 
-	struct open_file *file = (struct open_file*)(uintptr_t)fi->fh;
+	file_t *file = reinterpret_cast<file_t*>(fi->fh);
 
 	int ret = pread(file->fd, buf, size, offset);
-	if (ret < 0) {
-		fprintf(stderr, "## pread() error: %d\n", ret);
-		return -EIO;
-	}
-
+	if (ret < 0) wdfs_err("pread() error: %d\n", ret);
+    
 	return ret;
 }
 
@@ -655,16 +669,12 @@ static int wdfs_write(
 	off_t offset, struct fuse_file_info *fi)
 {
 	wdfs_dbg("%s(%s)\n", __func__, localpath); 
-    
 	assert(localpath && buf && fi);
 
-	struct open_file *file = (struct open_file*)(uintptr_t)fi->fh;
+	file_t *file = reinterpret_cast<file_t*>(fi->fh);
 
 	int ret = pwrite(file->fd, buf, size, offset);
-	if (ret < 0) {
-		fprintf(stderr, "## pwrite() error: %d\n", ret);
-		return -EIO;
-	}
+	if (ret < 0) wdfs_err("pwrite() error: %d\n", ret);
 
 	/* set this flag, to indicate that data has been modified and needs to be
 	 * put to the webdav server. */
@@ -681,8 +691,9 @@ static int wdfs_write(
 static int wdfs_release(const char *localpath, struct fuse_file_info *fi)
 {
     wdfs_dbg("%s(%s)\n", __func__, localpath); 
+    assert(localpath);
     
-	struct open_file *file = (struct open_file*)(uintptr_t)fi->fh;
+	file_t *file = reinterpret_cast<file_t*>(fi->fh);
 
 	auto remotepath(get_remotepath(localpath));
 	if (!remotepath) return -ENOMEM;
@@ -692,7 +703,7 @@ static int wdfs_release(const char *localpath, struct fuse_file_info *fi)
         
         {
             // Uploading file and updating cache to result values
-            cache_t::item_p cached_file = cache.get(remotepath.get());
+            auto cached_file = cache.get(remotepath.get());
             
             webdav_context_t ctx{session};  
             hook_helper_t hooker(session, &ctx);
@@ -706,8 +717,7 @@ static int wdfs_release(const char *localpath, struct fuse_file_info *fi)
             cache.update(remotepath.get(), *cached_file);
         }
         
-		if (wdfs.debug == true)
-			fprintf(stderr, ">> wdfs_release(): PUT the file to the server.\n");
+        wdfs_dbg("%s(): PUT the file to the server\n", __func__); 
 
 		/* attributes for this file are no longer up to date.
 		 * so remove it from cache. */
@@ -732,6 +742,7 @@ static int wdfs_release(const char *localpath, struct fuse_file_info *fi)
 	/* close filehandle and free memory */
 // 	close(file->fd);//TODO FIXME refference count
 	FREE(file);
+    fi->fh = 0;
 
 	return 0;
 }
@@ -825,7 +836,7 @@ static int wdfs_ftruncate(
 	auto remotepath = get_remotepath(localpath);
 	if (!remotepath) return -ENOMEM;
 
-	struct open_file *file = (struct open_file*)(uintptr_t)fi->fh;
+	struct file_t *file = (struct file_t*)(uintptr_t)fi->fh;
 
 	int ret = ftruncate(file->fd, size);
 	if (ret < 0) {

@@ -106,6 +106,11 @@ struct webdav_context_t {
             fprintf(stderr,">>  " format, ## arg);\
     } while (0)
     
+#define wdfs_err(format, arg...) do { \
+        if (wdfs.debug == true) \
+            fprintf(stderr,"##  " format, ## arg);\
+    } while (0)    
+    
 #define wdfs_pr(format, arg...) do { \
         if (wdfs.debug == true) \
             fprintf(stderr, format, ## arg);\
