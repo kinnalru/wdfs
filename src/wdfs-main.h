@@ -7,6 +7,7 @@
 
 #define FUSE_USE_VERSION 25
 
+#include <memory>
 #include <string>
 
 #include <fuse.h>
@@ -65,7 +66,7 @@ extern char *remotepath_basedir;
 struct dir_item {
 	void *buf;
 	fuse_fill_dir_t filler;
-	char *remotepath;
+	std::unique_ptr<char> remotepath;
 };
 
 #endif /*WDFSMAIN_H_*/

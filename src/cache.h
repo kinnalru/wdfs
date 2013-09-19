@@ -7,6 +7,8 @@
 
 #include "common.h"
 
+typedef std::unique_ptr<struct stat> stat_p;
+
 class cached_file_t {
     friend class boost::serialization::access;
 
@@ -45,6 +47,15 @@ public:
         return std::string(path.get());
     }
     inline int size() const {return cache_.size();}
+    
+    stat_p stat(const std::string& path_raw) const {
+        if (auto item = get(path_raw)) {
+            return stat_p(new struct stat(item->resource.stat));
+        }
+        else {
+            return stat_p();
+        }
+    }
     
     virtual item_p get(const std::string& path_raw) const {
         const std::string path = normalize(path_raw);

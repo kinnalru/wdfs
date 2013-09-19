@@ -212,7 +212,7 @@ enum field_e {
     END
 };
 
-static const std::vector<ne_propname> prop_names = [] {
+static const auto prop_names = [] {
     std::vector<ne_propname> v(END + 1);
     v[ETAG]     = {"DAV:", "getetag"};
     v[LENGTH]   = {"DAV:", "getcontentlength"};
@@ -225,24 +225,20 @@ static const std::vector<ne_propname> prop_names = [] {
     return v;
 } ();
 
-static const std::vector<ne_propname> anonymous_prop_names = [] {
+static const auto anonymous_prop_names = [] {
     std::vector<ne_propname> v = prop_names;
     for(auto it = v.begin(); it != v.end(); ++ it) it->nspace = NULL;
     return v;
 } ();
 
 /* returns the malloc()ed escaped remotepath on success or NULL on error */
-static char* get_remotepath(const char *localpath)
+static std::unique_ptr<char> get_remotepath(const char *localpath)
 {
-	assert(localpath);
-	char *remotepath = ne_concat(remotepath_basedir, localpath, NULL);
-	if (remotepath == NULL)
-		return NULL;
-	char *remotepath2 = unify_path(remotepath, ESCAPE | LEAVESLASH);
-	FREE(remotepath);
-	if (remotepath2 == NULL)
-		return NULL;
-	return remotepath2;
+    assert(localpath);
+    std::unique_ptr<char> remotepath(ne_concat(remotepath_basedir, localpath, NULL));
+    return (remotepath) 
+        ? std::unique_ptr<char>(unify_path(remotepath.get(), ESCAPE | LEAVESLASH))
+        : std::unique_ptr<char>();
 }
 
 
@@ -272,7 +268,7 @@ static void set_stat(etag_t& etag, struct stat& stat, const ne_prop_result_set *
 {
     wdfs_dbg("%s()\n", __func__);
 
-	const char *resourcetype, *contentlength, *lastmodified, *creationdate, *executable, *modestr, *etagstr;
+	const char *resourcetype, *contentlength, *lastmodified, *creationdate/*, *executable*/, *modestr, *etagstr;
     
 	assert(results);
 
@@ -281,7 +277,7 @@ static void set_stat(etag_t& etag, struct stat& stat, const ne_prop_result_set *
 	contentlength	= get_helper(results, LENGTH);
 	lastmodified	= get_helper(results, MODIFIED);
 	creationdate	= get_helper(results, CREATION);
-	executable	    = get_helper(results, EXECUTE);
+// 	executable	    = get_helper(results, EXECUTE);
 	modestr	        = get_helper(results, PERMISSIONS);
     etagstr         = get_helper(results, ETAG);
     
@@ -331,12 +327,10 @@ static void set_stat(etag_t& etag, struct stat& stat, const ne_prop_result_set *
  * remotepath is freed and set to the redirect target. returns -1 and prints an
  * error if the current host and new host differ. returns 0 on success and -1 
  * on error. side effect: remotepath is freed on error. */
-static int handle_redirect(char **remotepath)
+// static int handle_redirect(char **remotepath)
+static int handle_redirect(std::unique_ptr<char>& remotepath)
 {
     wdfs_dbg("%s(%s)\n", __func__, *remotepath);    
-
-	/* free the old value of remotepath, because it's no longer needed */
-	FREE(*remotepath);
 
 	/* get the current_uri and new_uri structs */
 	ne_uri current_uri;
@@ -354,8 +348,7 @@ static int handle_redirect(char **remotepath)
 	free_chars(&current_uri.host, &current_uri.scheme, NULL);
 
 	/* set the new remotepath to the redirect target path */
-	*remotepath = ne_strdup(new_uri->path);
-
+	remotepath.reset(ne_strdup(new_uri->path));
 	return 0;
 }
 
@@ -407,42 +400,34 @@ static void wdfs_getattr_propfind_callback(
 static int wdfs_getattr(const char *localpath, struct stat *stat)
 {
     wdfs_dbg("%s(%s)\n", __func__, localpath);      
-
 	assert(localpath && stat);
 
-	char *remotepath;
+    auto remotepath(get_remotepath(localpath));
+    if (!remotepath) return -ENOMEM;
 
-    remotepath = get_remotepath(localpath);
-
-	if (remotepath == NULL)
-		return -ENOMEM;
-
-    cache_t::item_p attr = cache.get(remotepath);
-	/* stat not found in the cache? perform a propfind to get stat! */
-	if (!attr) {
-		int ret = ne_simple_propfind(
-			session, remotepath, NE_DEPTH_ZERO, &prop_names[0],
-			wdfs_getattr_propfind_callback, stat);
-		/* handle the redirect and retry the propfind with the new target */
-		if (ret == NE_REDIRECT && wdfs.redirect == true) {
-			if (handle_redirect(&remotepath))
-				return -ENOENT;
-			ret = ne_simple_propfind(
-				session, remotepath, NE_DEPTH_ZERO, &prop_names[0],
-				wdfs_getattr_propfind_callback, stat);
-		}
-		if (ret != NE_OK) {
-			fprintf(stderr, "## PROPFIND error in %s(): %s\n",
-				__func__, ne_get_error(session));
-			FREE(remotepath);
-			return -ENOENT;
-		}
-	} 
-	else {
-        *stat = attr->resource.stat;
+    
+    if (auto cached_stat = cache.stat(remotepath.get())) {
+        *stat = *cached_stat;
+    } 
+    else {
+        int ret = ne_simple_propfind(
+            session, remotepath.get(), NE_DEPTH_ZERO, &prop_names[0],
+            wdfs_getattr_propfind_callback, stat);
+        /* handle the redirect and retry the propfind with the new target */
+        if (ret == NE_REDIRECT && wdfs.redirect == true) {
+            if (handle_redirect(remotepath))
+                return -ENOENT;
+            ret = ne_simple_propfind(
+                session, remotepath.get(), NE_DEPTH_ZERO, &prop_names[0],
+                wdfs_getattr_propfind_callback, stat);
+        }
+        if (ret != NE_OK) {
+            fprintf(stderr, "## PROPFIND error in %s(): %s\n",
+                __func__, ne_get_error(session));
+            return -ENOENT;
+        }
     }
 
-	FREE(remotepath);
 	return 0;
 }
 
@@ -470,7 +455,7 @@ static void wdfs_readdir_propfind_callback(
 	assert(item_data);
 
 	char *remotepath1 = unify_path(remotepath, UNESCAPE);
-	char *remotepath2 = unify_path(item_data->remotepath, UNESCAPE);
+	char *remotepath2 = unify_path(item_data->remotepath.get(), UNESCAPE);
 	if (remotepath1 == NULL || remotepath2 == NULL) {
 		free_chars(&remotepath, &remotepath1, &remotepath2, NULL);
 		fprintf(stderr, "## fatal error: unify_path() returned NULL\n");
@@ -518,34 +503,32 @@ static int wdfs_readdir(
 	off_t offset, struct fuse_file_info *fi)
 {
     wdfs_dbg("%s(%s)\n", __func__, localpath);      
-
 	assert(localpath && filler);
 
-	struct dir_item item_data;
-	item_data.buf = buf;
-	item_data.filler = filler;
-
-    item_data.remotepath = get_remotepath(localpath);
+	struct dir_item item_data = {
+        buf,
+        filler,
+        get_remotepath(localpath)
+    };
 
 	if (item_data.remotepath == NULL)
 		return -ENOMEM;
 
 
 	int ret = ne_simple_propfind(
-		session, item_data.remotepath, NE_DEPTH_ONE,
+		session, item_data.remotepath.get(), NE_DEPTH_ONE,
 		&prop_names[0], wdfs_readdir_propfind_callback, &item_data);
 	/* handle the redirect and retry the propfind with the redirect target */
 	if (ret == NE_REDIRECT && wdfs.redirect == true) {
-		if (handle_redirect(&item_data.remotepath))
+		if (handle_redirect(item_data.remotepath))
 			return -ENOENT;
 		ret = ne_simple_propfind(
-			session, item_data.remotepath, NE_DEPTH_ONE,
+			session, item_data.remotepath.get(), NE_DEPTH_ONE,
 			&prop_names[0], wdfs_readdir_propfind_callback, &item_data);
 	}
 	if (ret != NE_OK) {
 			fprintf(stderr, "## PROPFIND error in %s(): %s\n",
 				__func__, ne_get_error(session));
-		FREE(item_data.remotepath);
 		return -ENOENT;
 	}
 
@@ -555,7 +538,6 @@ static int wdfs_readdir(
 	filler(buf, ".", &st, 0);
 	filler(buf, "..", &st, 0);
 
-	FREE(item_data.remotepath);
 	return 0;
 }
 
@@ -574,13 +556,8 @@ static int wdfs_open(const char *localpath, struct fuse_file_info *fi)
     file->fd = -1;
 	file->modified = false;
 
-	std::unique_ptr<char> remotepath;
-
-    remotepath.reset(get_remotepath(localpath));
-
-	if (!remotepath.get()) {
-		return -ENOMEM;
-	}
+	auto remotepath = get_remotepath(localpath);
+	if (!remotepath) return -ENOMEM;
 
 	webdav_resource_t resource;
     
@@ -707,9 +684,8 @@ static int wdfs_release(const char *localpath, struct fuse_file_info *fi)
     
 	struct open_file *file = (struct open_file*)(uintptr_t)fi->fh;
 
-	std::unique_ptr<char> remotepath(get_remotepath(localpath));
-	if (!remotepath)
-		return -ENOMEM;
+	auto remotepath(get_remotepath(localpath));
+	if (!remotepath) return -ENOMEM;
 
 	/* put the file only to the server, if it was modified. */
 	if (file->modified == true) {
@@ -781,9 +757,8 @@ static int wdfs_truncate(const char *localpath, off_t size)
 	 *  4. read from fh_out and put file to the server
 	 */
 
-	char *remotepath = get_remotepath(localpath);
-	if (remotepath == NULL)
-		return -ENOMEM;
+	auto remotepath = get_remotepath(localpath);
+	if (!remotepath) return -ENOMEM;
 
 	int ret;
 	int fh_in  = get_filehandle();
@@ -797,11 +772,10 @@ static int wdfs_truncate(const char *localpath, off_t size)
 	/* if truncate(0) is called, there is no need to get the data, because it 
 	 * would not be used. */
 	if (size != 0) {
-		if (ne_get(session, remotepath, fh_in)) {
+		if (ne_get(session, remotepath.get(), fh_in)) {
 			fprintf(stderr, "## GET error: %s\n", ne_get_error(session));
 			close(fh_in);
 			close(fh_out);
-			FREE(remotepath);
 			return -ENOENT;
 		}
 
@@ -810,7 +784,6 @@ static int wdfs_truncate(const char *localpath, off_t size)
 			fprintf(stderr, "## pread() error: %d\n", ret);
 			close(fh_in);
 			close(fh_out);
-			FREE(remotepath);
 			return -EIO;
 		}
 	}
@@ -820,15 +793,13 @@ static int wdfs_truncate(const char *localpath, off_t size)
 		fprintf(stderr, "## pwrite() error: %d\n", ret);
 		close(fh_in);
 		close(fh_out);
-		FREE(remotepath);
 		return -EIO;
 	}
 
-	if (ne_put(session, remotepath, fh_out)) {
+	if (ne_put(session, remotepath.get(), fh_out)) {
 		fprintf(stderr, "## PUT error: %s\n", ne_get_error(session));
 		close(fh_in);
 		close(fh_out);
-		FREE(remotepath);
 		return -EIO;
 	}
 
@@ -837,7 +808,6 @@ static int wdfs_truncate(const char *localpath, off_t size)
 
 	close(fh_in);
 	close(fh_out);
-	FREE(remotepath);
 	return 0;
 }
 
@@ -852,16 +822,14 @@ static int wdfs_ftruncate(
     wdfs_dbg("%s(%s)\n", __func__, localpath); 
 	assert(localpath && fi);
 
-	char *remotepath = get_remotepath(localpath);
-	if (remotepath == NULL)
-		return -ENOMEM;
+	auto remotepath = get_remotepath(localpath);
+	if (!remotepath) return -ENOMEM;
 
 	struct open_file *file = (struct open_file*)(uintptr_t)fi->fh;
 
 	int ret = ftruncate(file->fd, size);
 	if (ret < 0) {
 		fprintf(stderr, "## ftruncate() error: %d\n", ret);
-		FREE(remotepath);
 		return -EIO;
 	}
 
@@ -870,7 +838,7 @@ static int wdfs_ftruncate(
 	file->modified = true;
 
 	/* update the cache item of the ftruncate()d file */
-    cache_t::item_p cached_file = cache.get(remotepath);
+    cache_t::item_p cached_file = cache.get(remotepath.get());
     assert(cached_file);
 // 	if (!cached_file) {
 // 		fprintf(stderr,
@@ -886,9 +854,7 @@ static int wdfs_ftruncate(
 	cached_file->resource.stat.st_blocks	= (cached_file->resource.stat.st_size + 511) / 512;
 
 	/* update the cache */
-	cache.update(remotepath, *cached_file);
-
-	FREE(remotepath);
+	cache.update(remotepath.get(), *cached_file);
 
 	return 0;
 }
@@ -901,28 +867,24 @@ static int wdfs_mknod(const char *localpath, mode_t mode, dev_t rdev)
     wdfs_dbg("%s(%s)\n", __func__, localpath); 
 	assert(localpath);
 
-	char *remotepath = get_remotepath(localpath);
-	if (remotepath == NULL)
-		return -ENOMEM;
+	auto remotepath = get_remotepath(localpath);
+	if (!remotepath) return -ENOMEM;
 
 	int fh = get_filehandle();
 	if (fh == -1) {
-		FREE(remotepath);
 		return -EIO;
 	}
 
     webdav_context_t ctx{session};  
     hook_helper_t hooker(session, &ctx);
     
-	if (ne_put(session, remotepath, fh)) {
+	if (ne_put(session, remotepath.get(), fh)) {
 		fprintf(stderr, "## PUT error: %s\n", ne_get_error(session));
 		close(fh);
-		FREE(remotepath);
 		return -EIO;
 	}
 
 	close(fh);
-	FREE(remotepath);
 	return 0;
 }
 
@@ -934,17 +896,14 @@ static int wdfs_mkdir(const char *localpath, mode_t mode)
     wdfs_dbg("%s(%s)\n", __func__, localpath); 
 	assert(localpath);
 
-	char *remotepath = get_remotepath(localpath);
-	if (remotepath == NULL)
-		return -ENOMEM;
+	auto remotepath = get_remotepath(localpath);
+	if (!remotepath) return -ENOMEM;
 
-	if (ne_mkcol(session, remotepath)) {
+	if (ne_mkcol(session, remotepath.get())) {
 		fprintf(stderr, "MKCOL error: %s\n", ne_get_error(session));
-		FREE(remotepath);
 		return -ENOENT;
 	}
 
-	FREE(remotepath);
 	return 0;
 }
 
@@ -956,28 +915,26 @@ static int wdfs_unlink(const char *localpath)
     wdfs_dbg("%s(%s)\n", __func__, localpath); 
 	assert(localpath);
 
-	char *remotepath = get_remotepath(localpath);
-	if (remotepath == NULL)
-		return -ENOMEM;
+	auto remotepath = get_remotepath(localpath);
+	if (!remotepath) return -ENOMEM;
 
 	/* unlock the file, to be able to unlink it */
 	if (wdfs.locking_mode != NO_LOCK) {
-		if (unlockfile(remotepath)) {
-			FREE(remotepath);
+		if (unlockfile(remotepath.get())) {
 			return -EACCES;
 		}
 	}
 
-	int ret = ne_delete(session, remotepath);
+	int ret = ne_delete(session, remotepath.get());
 	if (ret == NE_REDIRECT && wdfs.redirect == true) {
-		if (handle_redirect(&remotepath))
+		if (handle_redirect(remotepath))
 			return -ENOENT;
-		ret = ne_delete(session, remotepath);
+		ret = ne_delete(session, remotepath.get());
 	}
 
 	/* file successfully deleted! remove it also from the cache. */
 	if (ret == 0) {
-		cache.remove(remotepath);
+		cache.remove(remotepath.get());
 	/* return more specific error message in case of permission problems */
 	} else if (!strcmp(ne_get_error(session), "403 Forbidden")) {
 		ret = -EPERM;
@@ -986,7 +943,6 @@ static int wdfs_unlink(const char *localpath)
 		ret = -EIO;
 	}
 
-	FREE(remotepath);
 	return ret;
 }
 
@@ -998,36 +954,33 @@ static int wdfs_rename(const char *localpath_src, const char *localpath_dest)
     wdfs_dbg("%s(%s -> %s)\n", __func__, localpath_src, localpath_dest); 
 	assert(localpath_src && localpath_dest);
 
-	char *remotepath_src  = get_remotepath(localpath_src);
-	char *remotepath_dest = get_remotepath(localpath_dest);
-	if (remotepath_src == NULL || remotepath_dest == NULL )
-		return -ENOMEM;
+	auto remotepath_src  = get_remotepath(localpath_src);
+	auto remotepath_dest = get_remotepath(localpath_dest);
+	if (!remotepath_src || !remotepath_dest) return -ENOMEM;
 
 	/* unlock the source file, before renaming */
 	if (wdfs.locking_mode != NO_LOCK) {
-		if (unlockfile(remotepath_src)) {
-			FREE(remotepath_src);
+		if (unlockfile(remotepath_src.get())) {
 			return -EACCES;
 		}
 	}
 
-	int ret = ne_move(session, 1, remotepath_src, remotepath_dest);
+	int ret = ne_move(session, 1, remotepath_src.get(), remotepath_dest.get());
 	if (ret == NE_REDIRECT && wdfs.redirect == true) {
-		if (handle_redirect(&remotepath_src))
+		if (handle_redirect(remotepath_src))
 			return -ENOENT;
-		ret = ne_move(session, 1, remotepath_src, remotepath_dest);
+		ret = ne_move(session, 1, remotepath_src.get(), remotepath_dest.get());
 	}
 
 	if (ret == 0) {
 		/* rename was successful and the source file no longer exists.
 		 * hence, remove it from the cache. */
-		cache.remove(remotepath_src);
+		cache.remove(remotepath_src.get());
 	} else {
 		fprintf(stderr, "## MOVE error: %s\n", ne_get_error(session));
 		ret = -EIO;
 	}
 
-	free_chars(&remotepath_src, &remotepath_dest, NULL);
 	return ret;
 }
 
