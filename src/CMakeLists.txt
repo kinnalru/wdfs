@@ -27,14 +27,12 @@ set(HEADERS
 	cache.h
 	common.h
 	config.h
-	svn.h
 	wdfs-main.h
 	webdav.h
 )
 
 set(SOURCES
 	cache.cpp
-	svn.cpp
 	webdav.cpp
 	wdfs-main.cpp
 	common.cpp

@@ -42,7 +42,6 @@
 #include "wdfs-main.h"
 #include "webdav.h"
 #include "cache.h"
-#include "svn.h"
 
 
 
@@ -82,7 +81,6 @@ struct wdfs_conf wdfs = [] () {
     w.username = NULL;
     w.password = NULL;
     w.redirect = true;
-    w.svn_mode = false;
     w.locking_mode = NO_LOCK;
     w.locking_timeout = 300;
     w.webdav_resource = NULL;
@@ -120,8 +118,6 @@ static struct fuse_opt wdfs_opts[] = {
 	WDFS_OPT("-p %s",				password, 0),
 	WDFS_OPT("password=%s",			password, 0),
 	WDFS_OPT("no_redirect",			redirect, false),
-	WDFS_OPT("-S",					svn_mode, true),
-	WDFS_OPT("svn_mode",			svn_mode, true),
 	WDFS_OPT("-l",					locking_mode, SIMPLE_LOCK),
 	WDFS_OPT("locking",				locking_mode, SIMPLE_LOCK),
 	WDFS_OPT("locking=0",			locking_mode, NO_LOCK),
@@ -416,26 +412,7 @@ static int wdfs_getattr(const char *localpath, struct stat *stat)
 
 	char *remotepath;
 
-	/* for details about the svn_mode, please have a look at svn.c */
-	/* get the stat for the svn_basedir, if localpath equals svn_basedir. */
-	if (wdfs.svn_mode == true && !strcmp(localpath, svn_basedir)) {
-		*stat = svn_get_static_dir_stat();
-		return 0;
-	}
-
-	/* if svn_mode is enabled and string localpath starts with svn_basedir... */
-	if (wdfs.svn_mode == true && g_str_has_prefix(localpath, svn_basedir)) {
-		/* ...get stat for the level 1 directories... */
-		if (svn_get_level1_stat(stat, localpath) == 0) {
-			return 0;
-		/* ...or get remotepath and go on. */
-		} else {
-			remotepath = svn_get_remotepath(localpath);
-		}
-	/* normal mode; no svn mode */
-	} else {
-		remotepath = get_remotepath(localpath);
-	}
+    remotepath = get_remotepath(localpath);
 
 	if (remotepath == NULL)
 		return -ENOMEM;
@@ -548,31 +525,7 @@ static int wdfs_readdir(
 	item_data.buf = buf;
 	item_data.filler = filler;
 
-	/* for details about the svn_mode, please have a look at svn.c */
-	/* if svn_mode is enabled, add svn_basedir to root */
-	if (wdfs.svn_mode == true && !strcmp(localpath, "/")) {
-		filler(buf, svn_basedir + 1, NULL, 0);
-	}
-
-	/* if svn_mode is enabled, add level 1 directories to svn_basedir */
-	if (wdfs.svn_mode == true && !strcmp(localpath, svn_basedir)) {
-		svn_add_level1_directories(&item_data);
-		return 0;
-	}
-
-	/* if svn_mode is enabled and string localpath starts with svn_basedir... */
-	if (wdfs.svn_mode == true && g_str_has_prefix(localpath, svn_basedir)) {
-		/* ... add level 2 directories and return... */
-		if (svn_add_level2_directories(&item_data, localpath) == 0) {
-			return 0;
-		/* ...or get remote path and go on */
-		} else {
-			item_data.remotepath = svn_get_remotepath(localpath);
-		}
-	/* normal mode; no svn mode */
-	} else {
-		item_data.remotepath = get_remotepath(localpath);
-	}
+    item_data.remotepath = get_remotepath(localpath);
 
 	if (item_data.remotepath == NULL)
 		return -ENOMEM;
@@ -623,10 +576,7 @@ static int wdfs_open(const char *localpath, struct fuse_file_info *fi)
 
 	std::unique_ptr<char> remotepath;
 
-	if (wdfs.svn_mode == true && g_str_has_prefix(localpath, svn_basedir))
-		remotepath.reset(svn_get_remotepath(localpath));
-	else
-		remotepath.reset(get_remotepath(localpath));
+    remotepath.reset(get_remotepath(localpath));
 
 	if (!remotepath.get()) {
 		return -ENOMEM;
@@ -660,8 +610,7 @@ static int wdfs_open(const char *localpath, struct fuse_file_info *fi)
             return -EIO;
         
         /* try to lock, if locking is enabled and file is not below svn_basedir. */
-        if (wdfs.locking_mode != NO_LOCK && 
-                !g_str_has_prefix(localpath, svn_basedir)) {
+        if (wdfs.locking_mode != NO_LOCK) {
             if (lockfile(remotepath.get(), wdfs.locking_timeout)) {
                 /* locking the file is not possible, because the file is locked by 
                 * somebody else. read-only access is allowed. */
@@ -731,10 +680,6 @@ static int wdfs_write(
 	wdfs_dbg("%s(%s)\n", __func__, localpath); 
     
 	assert(localpath && buf && fi);
-
-	/* data below svn_basedir is read-only */
-	if (wdfs.svn_mode == true && g_str_has_prefix(localpath, svn_basedir))
-		return -EROFS;
 
 	struct open_file *file = (struct open_file*)(uintptr_t)fi->fh;
 
@@ -829,10 +774,6 @@ static int wdfs_truncate(const char *localpath, off_t size)
 
 	assert(localpath);
 
-	/* data below svn_basedir is read-only */
-	if (wdfs.svn_mode == true && g_str_has_prefix(localpath, svn_basedir))
-		return -EROFS;
-
 	/* the truncate procedure:
 	 *  1. get the complete file and write into fh_in
 	 *  2. read size bytes from fh_in to buffer
@@ -911,10 +852,6 @@ static int wdfs_ftruncate(
     wdfs_dbg("%s(%s)\n", __func__, localpath); 
 	assert(localpath && fi);
 
-	/* data below svn_basedir is read-only */
-	if (wdfs.svn_mode == true && g_str_has_prefix(localpath, svn_basedir))
-		return -EROFS;
-
 	char *remotepath = get_remotepath(localpath);
 	if (remotepath == NULL)
 		return -ENOMEM;
@@ -964,10 +901,6 @@ static int wdfs_mknod(const char *localpath, mode_t mode, dev_t rdev)
     wdfs_dbg("%s(%s)\n", __func__, localpath); 
 	assert(localpath);
 
-	/* data below svn_basedir is read-only */
-	if (wdfs.svn_mode == true && g_str_has_prefix(localpath, svn_basedir))
-		return -EROFS;
-
 	char *remotepath = get_remotepath(localpath);
 	if (remotepath == NULL)
 		return -ENOMEM;
@@ -1001,10 +934,6 @@ static int wdfs_mkdir(const char *localpath, mode_t mode)
     wdfs_dbg("%s(%s)\n", __func__, localpath); 
 	assert(localpath);
 
-	/* data below svn_basedir is read-only */
-	if (wdfs.svn_mode == true && g_str_has_prefix(localpath, svn_basedir))
-		return -EROFS;
-
 	char *remotepath = get_remotepath(localpath);
 	if (remotepath == NULL)
 		return -ENOMEM;
@@ -1026,10 +955,6 @@ static int wdfs_unlink(const char *localpath)
 {
     wdfs_dbg("%s(%s)\n", __func__, localpath); 
 	assert(localpath);
-
-	/* data below svn_basedir is read-only */
-	if (wdfs.svn_mode == true && g_str_has_prefix(localpath, svn_basedir))
-		return -EROFS;
 
 	char *remotepath = get_remotepath(localpath);
 	if (remotepath == NULL)
@@ -1072,12 +997,6 @@ static int wdfs_rename(const char *localpath_src, const char *localpath_dest)
 {
     wdfs_dbg("%s(%s -> %s)\n", __func__, localpath_src, localpath_dest); 
 	assert(localpath_src && localpath_dest);
-
-	/* data below svn_basedir is read-only */
-	if	(wdfs.svn_mode == true &&
-		(g_str_has_prefix(localpath_src, svn_basedir) ||
-		 g_str_has_prefix(localpath_dest, svn_basedir)))
-		return -EROFS;
 
 	char *remotepath_src  = get_remotepath(localpath_src);
 	char *remotepath_dest = get_remotepath(localpath_dest);
@@ -1226,7 +1145,6 @@ static void wdfs_destroy(void*)
 	unlock_all_files();
 	ne_session_destroy(session);
 	FREE(remotepath_basedir);
-	svn_free_repository_root();
 }
 
 static struct fuse_operations wdfs_operations  = [] () {
@@ -1338,7 +1256,7 @@ int main(int argc, char *argv[])
 		fprintf(stderr, 
 			"wdfs settings:\n  program_name: %s\n  webdav_resource: %s\n"
 			"  accept_certificate: %s\n  username: %s\n  password: %s\n"
-			"  redirect: %s\n  svn_mode: %s\n  locking_mode: %i\n"
+			"  redirect: %s\n  locking_mode: %i\n"
 			"  locking_timeout: %i\n",
 			wdfs.program_name,
 			wdfs.webdav_resource ? wdfs.webdav_resource : "NULL",
@@ -1346,7 +1264,6 @@ int main(int argc, char *argv[])
 			wdfs.username ? wdfs.username : "NULL",
 			wdfs.password ? "****" : "NULL",
 			wdfs.redirect == true ? "true" : "false",
-			wdfs.svn_mode == true ? "true" : "false",
 			wdfs.locking_mode, wdfs.locking_timeout);
 	}
 
@@ -1371,16 +1288,6 @@ int main(int argc, char *argv[])
 	if (setup_webdav_session(wdfs.webdav_resource, wdfs.username, wdfs.password)) {
 		status_program_exec = 1;
 		goto cleanup;
-	}
-
-	if (wdfs.svn_mode == true) {
-		if(svn_set_repository_root()) {
-			fprintf(stderr,
-				"## error: could not set subversion repository root.\n");
-			ne_session_destroy(session);
-			status_program_exec = 1;
-			goto cleanup;
-		}
 	}
 
 	/* finally call fuse */

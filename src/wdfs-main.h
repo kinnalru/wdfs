@@ -42,9 +42,6 @@ struct wdfs_conf {
 	char *password;
 	/* if set to "true" enables http redirect support */
 	bool redirect;
-	/* if set to "true" enables transparent access to all svn revisions in
-	 * a repository thru a virtual directory. */
-	bool svn_mode;
 	/* locking mode of files */
 	int locking_mode;
 	/* timeout for a lock in seconds */
