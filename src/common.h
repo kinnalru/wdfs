@@ -6,8 +6,9 @@
 #include <memory>
 #include <string>
 
-//#include <optional>
 #include <boost/optional.hpp>
+#include <boost/archive/text_oarchive.hpp>
+#include <boost/archive/text_iarchive.hpp>
 
 typedef struct ne_session_s ne_session;
 typedef boost::optional<std::string> etag_t;
@@ -57,10 +58,21 @@ std::unique_ptr<T> from_string(const std::string& strdata) {
 }
     
 struct webdav_resource_t {
+private:
+    friend class boost::serialization::access;
     
+    template<class Archive>
+    void serialize(Archive & ar, const unsigned int version)
+    {
+        ar & degrees;
+        ar & minutes;
+        ar & seconds;
+    }
+public:
     webdav_resource_t() {
         memset(&stat, 0, sizeof(struct stat));
     };
+    
     
     wrap_stat_field(mtime, time_t, stat);
     wrap_stat_field(size, off_t, stat);
