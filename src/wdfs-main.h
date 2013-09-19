@@ -7,6 +7,8 @@
 
 #define FUSE_USE_VERSION 25
 
+#include <string>
+
 #include <fuse.h>
 #include <ne_basic.h>
 
@@ -30,24 +32,26 @@
 */
 
 struct wdfs_conf {
-	/* the name of the wdfs executable */
-	char *program_name;
-	/* if set to "true" wdfs specific debug output is generated */
-	bool debug;
-	/* if set to "true" every certificate is accepted without asking the user */
-	bool accept_certificate;
-	/* username of the webdav resource */
-	char *username;
-	/* password of the webdav resource */
-	char *password;
-	/* if set to "true" enables http redirect support */
-	bool redirect;
-	/* locking mode of files */
-	int locking_mode;
-	/* timeout for a lock in seconds */
-	int locking_timeout;
-	/* address of the webdav resource we are connecting to */
-	char *webdav_resource;
+    /* the name of the wdfs executable */
+    char *program_name;
+    /* if set to "true" wdfs specific debug output is generated */
+    bool debug;
+    /* if set to "true" every certificate is accepted without asking the user */
+    bool accept_certificate;
+    /* username of the webdav resource */
+    char *username;
+    /* password of the webdav resource */
+    char *password;
+    /* if set to "true" enables http redirect support */
+    bool redirect;
+    /* locking mode of files */
+    int locking_mode;
+    /* timeout for a lock in seconds */
+    int locking_timeout;
+    /* address of the webdav resource we are connecting to */
+    char *webdav_resource;
+    /* path to folder where cache(attrs AND files) located */
+    std::string cache_folder;
 };
 
 extern struct wdfs_conf wdfs;

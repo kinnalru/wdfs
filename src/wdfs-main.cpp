@@ -1112,7 +1112,7 @@ static int wdfs_statfs(const char *localpath, struct statvfs *buf)
     wdfs_dbg("%s()\n", __func__);
 
     try {
-        std::ifstream stream("/tmp/123");
+        std::ifstream stream((wdfs.cache_folder + "cache").c_str());
         boost::archive::text_iarchive oa(stream);
         oa >> cache;
     }
@@ -1133,7 +1133,7 @@ static void wdfs_destroy(void*)
     wdfs_dbg("%s()\n", __func__);
 
     try {
-        std::ofstream stream("/tmp/123");
+        std::ofstream stream((wdfs.cache_folder + "cache").c_str());
         boost::archive::text_oarchive oa(stream);
         oa << cache;
     }
@@ -1242,6 +1242,10 @@ int main(int argc, char *argv[])
 	if (fuse_opt_parse(&options, &wdfs, wdfs_opts, wdfs_opt_proc) == -1)
 		exit(1);
 
+    if(char const* home = getenv("HOME")) {
+        wdfs.cache_folder = std::string(home) + "/" + ".wdfs/";
+    }
+    
 	if (!wdfs.webdav_resource) {
 		fprintf(stderr, "%s: missing webdav uri\n", wdfs.program_name);
 		exit(1);
