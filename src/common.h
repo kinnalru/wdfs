@@ -55,6 +55,17 @@ struct webdav_context_t {
     webdav_resource_t resource;
 };
 
+/*макрос для печати отладочной информации. Если приживется...*/
+#define wdfs_dbg(format, arg...) do { \
+        if (wdfs.debug == true) \
+            fprintf(stderr,">>  " format, ## arg);\
+    } while (0)
+    
+#define wdfs_pr(format, arg...) do { \
+        if (wdfs.debug == true) \
+            fprintf(stderr, format, ## arg);\
+    } while (0)    
+
 /* removes all trailing slashes from the path. 
  * returns the new malloc()d path or NULL on error.  */
 char* remove_ending_slashes(const char *path);

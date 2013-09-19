@@ -234,20 +234,6 @@ static const std::vector<ne_propname> anonymous_prop_names = [] {
     return v;
 } ();
 
-
-/* this method prints some debug output and sets the http user agent string to
- * a more informative value. */
-static void print_debug_infos(const char *method, const char *parameter)
-{
-	assert(method);
-	fprintf(stderr, ">> %s(%s)\n", method, parameter);
-	char *useragent = 
-		ne_concat(project_name, " ", method, "(", parameter, ")", NULL);
-	ne_set_useragent(session, useragent);
-	FREE(useragent);
-}
-
-
 /* returns the malloc()ed escaped remotepath on success or NULL on error */
 static char* get_remotepath(const char *localpath)
 {
@@ -287,8 +273,7 @@ const char* get_helper(const ne_prop_result_set *results, field_e field) {
 /* evaluates the propfind result set and sets the file's attributes (stat) */
 static void set_stat(etag_t& etag, struct stat& stat, const ne_prop_result_set *results)
 {
-	if (wdfs.debug == true)
-		print_debug_infos(__func__, "");
+    wdfs_dbg("%s()\n", __func__);
 
 	const char *resourcetype, *contentlength, *lastmodified, *creationdate, *executable, *modestr, *etagstr;
     
@@ -351,8 +336,7 @@ static void set_stat(etag_t& etag, struct stat& stat, const ne_prop_result_set *
  * on error. side effect: remotepath is freed on error. */
 static int handle_redirect(char **remotepath)
 {
-	if (wdfs.debug == true)
-		print_debug_infos(__func__, *remotepath);
+    wdfs_dbg("%s(%s)\n", __func__, *remotepath);    
 
 	/* free the old value of remotepath, because it's no longer needed */
 	FREE(*remotepath);
@@ -395,8 +379,7 @@ static void wdfs_getattr_propfind_callback(
 	char *remotepath = ne_uri_unparse(href_uri);
 #endif
 
-	if (wdfs.debug == true)
-		print_debug_infos(__func__, remotepath);
+    wdfs_dbg("%s(%s)\n", __func__, remotepath);  
 
 	struct stat *stat = reinterpret_cast<struct stat*>(userdata);
 	memset(stat, 0, sizeof(struct stat));
@@ -426,8 +409,7 @@ static void wdfs_getattr_propfind_callback(
  * request. */
 static int wdfs_getattr(const char *localpath, struct stat *stat)
 {
-	if (wdfs.debug == true)
-		print_debug_infos(__func__, localpath);
+    wdfs_dbg("%s(%s)\n", __func__, localpath);      
 
 	assert(localpath && stat);
 
@@ -504,8 +486,7 @@ static void wdfs_readdir_propfind_callback(
 	char *remotepath = strdup(remotepath0);
 #endif
 
-	if (wdfs.debug == true)
-		print_debug_infos(__func__, remotepath);
+    wdfs_dbg("%s(%s)\n", __func__, remotepath);      
 
 	struct dir_item *item_data = (struct dir_item*)userdata;
 	assert(item_data);
@@ -558,8 +539,7 @@ static int wdfs_readdir(
 	const char *localpath, void *buf, fuse_fill_dir_t filler,
 	off_t offset, struct fuse_file_info *fi)
 {
-	if (wdfs.debug == true)
-		print_debug_infos(__func__, localpath);
+    wdfs_dbg("%s(%s)\n", __func__, localpath);      
 
 	assert(localpath && filler);
 
@@ -631,11 +611,8 @@ static int wdfs_readdir(
  * filehandle. also create a "struct open_file" to store the filehandle. */
 static int wdfs_open(const char *localpath, struct fuse_file_info *fi)
 {
-	if (wdfs.debug == true) {
-		print_debug_infos(__func__, localpath);
-		fprintf(stderr,
-			">> %s() by PID %d\n", __func__, fuse_get_context()->pid);
-	}
+    wdfs_dbg("%s(%s)\n", __func__, localpath); 
+    wdfs_pr("   ++ by PID %d\n", fuse_get_context()->pid);
 
 	assert(localpath && fi);
 
@@ -729,8 +706,7 @@ static int wdfs_read(
 	const char *localpath, char *buf, size_t size,
 	off_t offset, struct fuse_file_info *fi)
 {
-	if (wdfs.debug == true)
-		print_debug_infos(__func__, localpath);
+    wdfs_dbg("%s(%s)\n", __func__, localpath); 
 
 	assert(localpath && buf && fi);
 
@@ -751,9 +727,8 @@ static int wdfs_write(
 	const char *localpath, const char *buf, size_t size,
 	off_t offset, struct fuse_file_info *fi)
 {
-	if (wdfs.debug == true)
-		print_debug_infos(__func__, localpath);
-
+	wdfs_dbg("%s(%s)\n", __func__, localpath); 
+    
 	assert(localpath && buf && fi);
 
 	/* data below svn_basedir is read-only */
@@ -782,9 +757,8 @@ static int wdfs_write(
  * time to put it to the server, but only if it was modified. */
 static int wdfs_release(const char *localpath, struct fuse_file_info *fi)
 {
-	if (wdfs.debug == true)
-		print_debug_infos(__func__, localpath);
-
+    wdfs_dbg("%s(%s)\n", __func__, localpath); 
+    
 	struct open_file *file = (struct open_file*)(uintptr_t)fi->fh;
 
 	std::unique_ptr<char> remotepath(get_remotepath(localpath));
@@ -849,10 +823,8 @@ static int wdfs_release(const char *localpath, struct fuse_file_info *fi)
  */
 static int wdfs_truncate(const char *localpath, off_t size)
 {
-	if (wdfs.debug == true) {
-		print_debug_infos(__func__, localpath);
-		fprintf(stderr, ">> truncate() at offset %li\n", (long int)size);
-	}
+    wdfs_dbg("%s(%s)\n", __func__, localpath); 
+    wdfs_pr("   ++ at offset %li\n", (long int)size);
 
 	assert(localpath);
 
@@ -935,9 +907,7 @@ static int wdfs_truncate(const char *localpath, off_t size)
 static int wdfs_ftruncate(
 	const char *localpath, off_t size, struct fuse_file_info *fi)
 {
-	if (wdfs.debug == true)
-		print_debug_infos(__func__, localpath);
-
+    wdfs_dbg("%s(%s)\n", __func__, localpath); 
 	assert(localpath && fi);
 
 	/* data below svn_basedir is read-only */
@@ -990,9 +960,7 @@ static int wdfs_ftruncate(
  * this method creates a empty file using the webdav method put. */
 static int wdfs_mknod(const char *localpath, mode_t mode, dev_t rdev)
 {
-	if (wdfs.debug == true)
-		print_debug_infos(__func__, localpath);
-
+    wdfs_dbg("%s(%s)\n", __func__, localpath); 
 	assert(localpath);
 
 	/* data below svn_basedir is read-only */
@@ -1029,9 +997,7 @@ static int wdfs_mknod(const char *localpath, mode_t mode, dev_t rdev)
  * this method creates a directory / collection using the webdav method mkcol. */
 static int wdfs_mkdir(const char *localpath, mode_t mode)
 {
-	if (wdfs.debug == true)
-		print_debug_infos(__func__, localpath);
-
+    wdfs_dbg("%s(%s)\n", __func__, localpath); 
 	assert(localpath);
 
 	/* data below svn_basedir is read-only */
@@ -1057,9 +1023,7 @@ static int wdfs_mkdir(const char *localpath, mode_t mode)
  * this methods removes a file or directory using the webdav method delete. */
 static int wdfs_unlink(const char *localpath)
 {
-	if (wdfs.debug == true)
-		print_debug_infos(__func__, localpath);
-
+    wdfs_dbg("%s(%s)\n", __func__, localpath); 
 	assert(localpath);
 
 	/* data below svn_basedir is read-only */
@@ -1105,11 +1069,7 @@ static int wdfs_unlink(const char *localpath)
  * this methods renames a file. it uses the webdav method move to do that. */
 static int wdfs_rename(const char *localpath_src, const char *localpath_dest)
 {
-	if (wdfs.debug == true) {
-		print_debug_infos(__func__, localpath_src);
-		print_debug_infos(__func__, localpath_dest);
-	}
-
+    wdfs_dbg("%s(%s -> %s)\n", __func__, localpath_src, localpath_dest); 
 	assert(localpath_src && localpath_dest);
 
 	/* data below svn_basedir is read-only */
@@ -1154,9 +1114,9 @@ static int wdfs_rename(const char *localpath_src, const char *localpath_dest)
 
 int wdfs_chmod(const char *localpath, mode_t mode)
 {
-	if (wdfs.debug == true)
-		print_debug_infos(__func__, localpath);
-
+    wdfs_dbg("%s(%s)\n", __func__, localpath);
+    assert(localpath);
+    
     std::unique_ptr<char> remotepath(get_remotepath(localpath));
     const std::string mode_str = std::to_string(mode);
     const std::string exec_str = (mode & S_IXUSR || mode & S_IXGRP || mode &S_IXOTH) ? "T" : "F";
@@ -1199,8 +1159,8 @@ int wdfs_chmod(const char *localpath, mode_t mode)
  * the file's content or properties change. */
 static int wdfs_setattr(const char *localpath, struct utimbuf *buf)
 {
-	if (wdfs.debug == true)
-		print_debug_infos(__func__, localpath);
+    wdfs_dbg("%s(%s)\n", __func__, localpath);
+    assert(localpath);
 
 	return 0;
 }
@@ -1209,8 +1169,8 @@ static int wdfs_setattr(const char *localpath, struct utimbuf *buf)
 /* this is a dummy implementation that pretends to have 1000 GB free space :D */
 static int wdfs_statfs(const char *localpath, struct statvfs *buf)
 {
-	if (wdfs.debug == true)
-		print_debug_infos(__func__, localpath);
+    wdfs_dbg("%s(%s)\n", __func__, localpath);
+    assert(localpath);
 
 	/* taken from sshfs v1.7, thanks miklos! */
 	buf->f_bsize = 512;
@@ -1229,8 +1189,10 @@ static int wdfs_statfs(const char *localpath, struct statvfs *buf)
 	static void* wdfs_init()
 #endif
 {
-	if (wdfs.debug == true)
-		fprintf(stderr, ">> %s()\n", __func__);
+    wdfs_dbg("%s()\n", __func__);
+    
+    
+    
 	return NULL;
 }
 
@@ -1239,8 +1201,7 @@ static int wdfs_statfs(const char *localpath, struct statvfs *buf)
  * this method is called, when the filesystems is unmounted. time to clean up! */
 static void wdfs_destroy(void*)
 {
-	if (wdfs.debug == true)
-		fprintf(stderr, ">> freeing globaly used memory\n");
+    wdfs_dbg("%s()\n", __func__);
 
 	/* free globaly used memory */
 	unlock_all_files();
