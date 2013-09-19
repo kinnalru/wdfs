@@ -1200,8 +1200,9 @@ static int wdfs_statfs(const char *localpath, struct statvfs *buf)
     catch(const std::exception& e) {
         wdfs_dbg("%s(): can't load cache\n", __func__);
     }
-    
-    
+
+    wdfs_dbg("%s() restored cache size: %d\n", __func__, cache.size());
+
 	return NULL;
 }
 
