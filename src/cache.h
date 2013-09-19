@@ -49,9 +49,18 @@ public:
         }
     }
     
-    virtual void add(const std::string& path_raw, const item& v) {
+    void add(const std::string& path_raw, const item& v) {
         const std::string path = normalize(path_raw);
+        assert(cache_.find(path) == cache_.end());
+        
         std::cerr << "cache +added+ for path:" << path << std::endl;
+        cache_[path] = v;
+    }
+    
+    void update(const std::string& path_raw, const item& v) {
+        const std::string path = normalize(path_raw);
+        assert(cache_.find(path) != cache_.end());
+        std::cerr << "cache +updated+ for path:" << path << std::endl;
         cache_[path] = v;
     }
     

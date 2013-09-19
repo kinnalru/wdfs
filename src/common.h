@@ -38,6 +38,11 @@ struct webdav_resource_t {
     wrap_stat_field(mtime, time_t, stat);
     wrap_stat_field(size, off_t, stat);
     
+    void update_from(const webdav_resource_t& other) {
+        etag = other.etag;
+        update_mtime(other.mtime());
+        update_size(other.size());
+    }
     
     etag_t etag;
     struct stat stat;
