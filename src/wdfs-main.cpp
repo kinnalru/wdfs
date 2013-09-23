@@ -338,7 +338,7 @@ static void set_stat(etag_t& etag, struct stat& stat, const ne_prop_result_set *
 // static int handle_redirect(char **remotepath)
 static int handle_redirect(std::unique_ptr<char>& remotepath)
 {
-    wdfs_dbg("%s(%s)\n", __func__, *remotepath);    
+    wdfs_dbg("%s(%s)\n", __func__, remotepath.get());
 
 	/* get the current_uri and new_uri structs */
 	ne_uri current_uri;
@@ -771,54 +771,69 @@ static int wdfs_truncate(const char *localpath, off_t size)
 	auto remotepath = get_remotepath(localpath);
 	if (!remotepath) return -ENOMEM;
 
-	int ret;
-	int fh_in  = get_filehandle();
-	int fh_out = get_filehandle();
-	if (fh_in == -1 || fh_out == -1)
-		return -EIO;
+    if (auto cached_file = cache.get(remotepath.get())) {
+        int fd = cached_file->fd;
+        if (fd != -1) {
+            if (int ret = ftruncate(fd, size)) {
+                fprintf(stderr, "## ftruncate() error: %d\n", ret);
+                return -EIO;                
+            }
+            else {
+                cached_file->resource.stat.st_size = size;
+                /* calculate number of 512 byte blocks */
+                cached_file->resource.stat.st_blocks = (cached_file->resource.stat.st_size + 511) / 512;
+                cache.update(remotepath.get(), *cached_file);
+            }
+            return 0;
+        }
+    }
+    
+    int ret;
+    int fh_in  = get_filehandle();
+    int fh_out = get_filehandle();
+    if (fh_in == -1 || fh_out == -1)
+        return -EIO;
 
-	char buffer[size];
-	memset(buffer, 0, size);
+    char buffer[size];
+    memset(buffer, 0, size);
 
-	/* if truncate(0) is called, there is no need to get the data, because it 
-	 * would not be used. */
-	if (size != 0) {
-		if (ne_get(session, remotepath.get(), fh_in)) {
-			fprintf(stderr, "## GET error: %s\n", ne_get_error(session));
-			close(fh_in);
-			close(fh_out);
-			return -ENOENT;
-		}
+    /* if truncate(0) is called, there is no need to get the data, because it
+    * would not be used. */
+    if (size != 0) {
+        if (ne_get(session, remotepath.get(), fh_in)) {
+            fprintf(stderr, "## GET error: %s\n", ne_get_error(session));
+            close(fh_in);
+            close(fh_out);
+            return -ENOENT;
+        }
 
-		ret = pread(fh_in, buffer, size, 0);
-		if (ret < 0) {
-			fprintf(stderr, "## pread() error: %d\n", ret);
-			close(fh_in);
-			close(fh_out);
-			return -EIO;
-		}
-	}
+        ret = pread(fh_in, buffer, size, 0);
+        if (ret < 0) {
+            fprintf(stderr, "## pread() error: %d\n", ret);
+            close(fh_in);
+            close(fh_out);
+            return -EIO;
+        }
+    }
 
-	ret = pwrite(fh_out, buffer, size, 0);
-	if (ret < 0) {
-		fprintf(stderr, "## pwrite() error: %d\n", ret);
-		close(fh_in);
-		close(fh_out);
-		return -EIO;
-	}
+    ret = pwrite(fh_out, buffer, size, 0);
+    if (ret < 0) {
+        fprintf(stderr, "## pwrite() error: %d\n", ret);
+        close(fh_in);
+        close(fh_out);
+        return -EIO;
+    }
 
-	if (ne_put(session, remotepath.get(), fh_out)) {
-		fprintf(stderr, "## PUT error: %s\n", ne_get_error(session));
-		close(fh_in);
-		close(fh_out);
-		return -EIO;
-	}
-
-	/* stat for this file is no longer up to date. remove it from the cache. */
-// 	cache_delete_item(remotepath); //TODO FIXME
-
-	close(fh_in);
-	close(fh_out);
+    if (ne_put(session, remotepath.get(), fh_out)) {
+        fprintf(stderr, "## PUT error: %s\n", ne_get_error(session));
+        close(fh_in);
+        close(fh_out);
+        return -EIO;
+    }
+    
+    close(fh_in);
+    close(fh_out);
+    
 	return 0;
 }
 
@@ -838,8 +853,7 @@ static int wdfs_ftruncate(
 
 	struct file_t *file = (struct file_t*)(uintptr_t)fi->fh;
 
-	int ret = ftruncate(file->fd, size);
-	if (ret < 0) {
+	if (int ret = ftruncate(file->fd, size)) {
 		fprintf(stderr, "## ftruncate() error: %d\n", ret);
 		return -EIO;
 	}
@@ -851,20 +865,9 @@ static int wdfs_ftruncate(
 	/* update the cache item of the ftruncate()d file */
     cache_t::item_p cached_file = cache.get(remotepath.get());
     assert(cached_file);
-// 	if (!cached_file) {
-// 		fprintf(stderr,
-// 			"## cache_get_item() error: item '%s' not found!\n", remotepath);
-// 		FREE(remotepath);
-// 		return -EIO;
-// 	}
-
-	/* set the new size after the ftruncate() call */
 	cached_file->resource.stat.st_size = size;
-
 	/* calculate number of 512 byte blocks */
 	cached_file->resource.stat.st_blocks	= (cached_file->resource.stat.st_size + 511) / 512;
-
-	/* update the cache */
 	cache.update(remotepath.get(), *cached_file);
 
 	return 0;
@@ -886,15 +889,12 @@ static int wdfs_mknod(const char *localpath, mode_t mode, dev_t rdev)
 		return -EIO;
 	}
 
-    webdav_context_t ctx{session};  
-    hook_helper_t hooker(session, &ctx);
-    
 	if (ne_put(session, remotepath.get(), fh)) {
 		fprintf(stderr, "## PUT error: %s\n", ne_get_error(session));
 		close(fh);
 		return -EIO;
 	}
-
+	
 	close(fh);
 	return 0;
 }
