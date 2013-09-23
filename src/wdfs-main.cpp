@@ -761,14 +761,64 @@ static int wdfs_truncate(const char *localpath, off_t size)
 
 	assert(localpath);
 
+	/* the truncate procedure:
+	 *  1. get the complete file and write into fh_in
+	 *  2. read size bytes from fh_in to buffer
+	 *  3. write size bytes from buffer to fh_out
+	 *  4. read from fh_out and put file to the server
+	 */
+
 	auto remotepath = get_remotepath(localpath);
 	if (!remotepath) return -ENOMEM;
 
-    auto cached_file = cache.get(remotepath.get());
-    int fd = cached_file->fd;
-    assert(fd != -1);
-    ftruncate(fd, size);
-  
+	int ret;
+	int fh_in  = get_filehandle();
+	int fh_out = get_filehandle();
+	if (fh_in == -1 || fh_out == -1)
+		return -EIO;
+
+	char buffer[size];
+	memset(buffer, 0, size);
+
+	/* if truncate(0) is called, there is no need to get the data, because it 
+	 * would not be used. */
+	if (size != 0) {
+		if (ne_get(session, remotepath.get(), fh_in)) {
+			fprintf(stderr, "## GET error: %s\n", ne_get_error(session));
+			close(fh_in);
+			close(fh_out);
+			return -ENOENT;
+		}
+
+		ret = pread(fh_in, buffer, size, 0);
+		if (ret < 0) {
+			fprintf(stderr, "## pread() error: %d\n", ret);
+			close(fh_in);
+			close(fh_out);
+			return -EIO;
+		}
+	}
+
+	ret = pwrite(fh_out, buffer, size, 0);
+	if (ret < 0) {
+		fprintf(stderr, "## pwrite() error: %d\n", ret);
+		close(fh_in);
+		close(fh_out);
+		return -EIO;
+	}
+
+	if (ne_put(session, remotepath.get(), fh_out)) {
+		fprintf(stderr, "## PUT error: %s\n", ne_get_error(session));
+		close(fh_in);
+		close(fh_out);
+		return -EIO;
+	}
+
+	/* stat for this file is no longer up to date. remove it from the cache. */
+// 	cache_delete_item(remotepath); //TODO FIXME
+
+	close(fh_in);
+	close(fh_out);
 	return 0;
 }
 
