@@ -177,6 +177,10 @@ static int wdfs_opt_proc(
                 wdfs.webdav_resource = strdup(option);
                 return 0;
             }
+            else if (wdfs.mountpoint.empty()) {
+                wdfs.mountpoint = option;
+                return 1;
+            }
             return 1;
 
         case FUSE_OPT_KEY_OPT:
@@ -249,19 +253,51 @@ static std::unique_ptr<char> get_remotepath(const char *localpath)
         : std::unique_ptr<char>();
 }
 
+static std::string get_cachepath(const std::string& localpath)
+{
+    if (localpath.find(wdfs.cache_folder) != std::string::npos)
+        return localpath;
+    else
+        return wdfs.cache_folder + "/files/" + localpath;
+}
+
+int mkdir_p(const std::string& path) {
+    int ret = system((std::string("mkdir -p ") + path.c_str()).c_str());
+    return WEXITSTATUS(ret);
+}
 
 /* returns a filehandle for read and write on success or -1 on error */
-static int get_filehandle()
+static int get_filehandle(const char* localpathraw = NULL)
 {
-    char dummyfile[] = "/tmp/wdfs-tmp-XXXXXX";
-    /* mkstemp() replaces XXXXXX by unique random chars and
-        * returns a filehandle for reading and writing */
-    int fh = mkstemp(dummyfile);
-    if (fh == -1)
-        fprintf(stderr, "## mkstemp(%s) error\n", dummyfile);
-    if (unlink(dummyfile))
-        fprintf(stderr, "## unlink() error\n");
-    return fh;
+    if (!localpathraw) {
+        char dummyfile[] = "/tmp/wdfs-tmp-XXXXXX";
+        /* mkstemp() replaces XXXXXX by unique random chars and
+            * returns a filehandle for reading and writing */
+        int fd = mkstemp(dummyfile);
+        if (fd == -1)
+            fprintf(stderr, "## mkstemp(%s) error\n", dummyfile);
+        if (unlink(dummyfile))
+            fprintf(stderr, "## unlink() error\n");
+        return fd;
+    }
+    else {
+        const std::string localpath = get_cachepath(localpathraw);
+        const char *filename = strrchr(localpath.c_str(), '/');
+        filename++;
+        const std::string folder(localpath.c_str(), filename);
+        
+        if (mkdir_p(folder)) {
+            fprintf(stderr, "## mkdir(%s) error\n", folder.c_str());      
+            return -1;
+        }
+        int fd = open(localpath.c_str(), O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
+        if (fd == -1)
+            fprintf(stderr, "## open(%s) error\n", localpath.c_str());
+        
+        wdfs_dbg("%s(%s) cached file %s created\n", __func__, localpathraw, localpath.c_str());
+        
+        return fd;
+    }
 }
 
 std::string get_filename(const char* remotepath) {
@@ -566,6 +602,8 @@ static int wdfs_open(const char *localpath, struct fuse_file_info *fi)
 
     auto remotepath = get_remotepath(localpath);
     if (!remotepath) return -ENOMEM;
+    
+    auto cachepath = get_cachepath(localpath);
 
     webdav_resource_t resource_full; //resource from PROPFIND request
     webdav_resource_t resource_new;
@@ -573,23 +611,37 @@ static int wdfs_open(const char *localpath, struct fuse_file_info *fi)
 
     if (auto cached_file = cache.get(remotepath.get())) {
         resource_full = cached_file->resource;
-        std::cerr << "full mode:" << resource_full.stat.st_mode << std::endl;
         
         if (resource_new.etag != cached_file->resource.etag) {
             wdfs_pr("   -- ETag is diferent - invalidate cache\n");
             cache.remove(remotepath.get());
+            unlink(cachepath.c_str());
         }
         else if (!resource_new.etag && resource_new.stat.st_mtime != cached_file->resource.stat.st_mtime) {
             wdfs_pr("   -- There no ETag supported and modtiem different - invalidate cache\n");
             cache.remove(remotepath.get());
+            unlink(cachepath.c_str());
         }
         else if (resource_new.stat.st_size != cached_file->resource.stat.st_size) {
             wdfs_pr("   -- Filesize different - invalidate cache\n");
             cache.remove(remotepath.get());
+            unlink(cachepath.c_str());
         }
         else if (cached_file->fd == -1) {
-            wdfs_pr("   -- There is no file in cache - remove cache record\n");
-            cache.remove(remotepath.get());
+            wdfs_pr("   -- There is no file in cache - try to restore cache from disk...\n");
+            wdfs_pr("   -- Trying to open file %s...\n", cachepath.c_str());
+            int fd = open(cachepath.c_str(), O_RDWR);
+            if (fd != -1) {
+                wdfs_pr("   ++ Filecache +hit+ RESTORED\n");                        
+                cached_file->fd = fd;
+                file->fd = cached_file->fd;
+                cache.update(remotepath.get(), *cached_file);
+            }          
+            else {
+                wdfs_pr("   -- Filecache +miss+ NOT RESTORED\n");             
+                cache.remove(remotepath.get());
+                unlink(cachepath.c_str());
+            }
         }
         else if (resource_new.stat.st_mtime != cached_file->resource.stat.st_mtime) {
             wdfs_pr("   ++ ETag and sizes are same but modtime different - update cache\n");
@@ -600,12 +652,11 @@ static int wdfs_open(const char *localpath, struct fuse_file_info *fi)
 
     if (auto cached_file = cache.get(remotepath.get())) {
         wdfs_pr("   ++ Filecache +hit+ no download needed\n");
-        std::cerr << "hit mode:" << cached_file->resource.stat.st_mode << std::endl;
         file->fd = cached_file->fd;
     }
     else {
         wdfs_pr("   ++ Filecache +miss+ download file\n");
-        file->fd = get_filehandle();
+        file->fd = get_filehandle(localpath);
         if (file->fd == -1) return -EIO;
         
         /* try to lock, if locking is enabled and file is not below svn_basedir. */
@@ -1221,8 +1272,7 @@ int main(int argc, char *argv[])
     if(char const* home = getenv("HOME")) {
         auto hasher = std::hash<std::string>();
         wdfs.cache_folder = std::string(home) + "/" + ".wdfs/" + std::to_string(hasher(wdfs.webdav_resource)) + "/";
-        int ret = system((std::string("mkdir -p ") + wdfs.cache_folder).c_str());
-        if (WEXITSTATUS(ret)) {
+        if (mkdir_p(wdfs.cache_folder)) {
             fprintf(stderr, "%s: can't create cache folder %s\n", wdfs.program_name, wdfs.cache_folder.c_str());
             exit(1);
         }
@@ -1243,7 +1293,7 @@ int main(int argc, char *argv[])
             "  accept_certificate: %s\n  username: %s\n  password: %s\n"
             "  redirect: %s\n  locking_mode: %i\n"
             "  locking_timeout: %i\n"
-            "  cache folder: %s\n",
+            "  cache folder: %s\n  mountpoint: %s\n",
             wdfs.program_name,
             wdfs.webdav_resource ? wdfs.webdav_resource : "NULL",
             wdfs.accept_certificate == true ? "true" : "false",
@@ -1251,7 +1301,7 @@ int main(int argc, char *argv[])
             wdfs.password ? "****" : "NULL",
             wdfs.redirect == true ? "true" : "false",
             wdfs.locking_mode, wdfs.locking_timeout,
-            wdfs.cache_folder.c_str());
+            wdfs.cache_folder.c_str(), wdfs.mountpoint.c_str());
     }
 
     /* set a nice name for /proc/mounts */

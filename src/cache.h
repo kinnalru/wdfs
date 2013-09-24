@@ -16,7 +16,7 @@ class cached_file_t {
     void serialize(Archive & ar, const unsigned int version)
     {
         ar & resource;
-        ar & fd;
+//         ar & fd;
     }
     
 public:
