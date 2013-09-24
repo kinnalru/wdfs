@@ -92,6 +92,12 @@ void free_chars(char **arg, ...)
     va_end(ap);
 }
 
+int mkdir_p(const std::string& path)
+{
+    int ret = system((std::string("mkdir -p ") + path.c_str()).c_str());
+    return WEXITSTATUS(ret);
+}
+
 
 
 

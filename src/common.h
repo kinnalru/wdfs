@@ -127,6 +127,8 @@ char* unify_path(const char *path_in, int mode);
 /* free()s each char passed that is not NULL and sets it to NULL after freeing */
 void free_chars(char **arg, ...);
 
+int mkdir_p(const std::string& path);
+
 /* takes an lvalue and sets it to NULL after freeing. taken from neon. */
 #define FREE(x) do { if ((x) != NULL) free((x)); (x) = NULL; } while (0)
 
