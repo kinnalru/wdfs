@@ -264,6 +264,13 @@ static int get_filehandle()
     return fh;
 }
 
+std::string get_filename(const char* remotepath) {
+    /* extract filename from the path. it's the string behind the last '/'. */
+    const char *filename = strrchr(remotepath, '/');
+    filename++;
+    return filename;
+}
+
 const char* get_helper(const ne_prop_result_set *results, field_e field) {
     const char* data = ne_propset_value(results, &prop_names[field]);
     return (data) 
@@ -474,9 +481,7 @@ static void wdfs_readdir_propfind_callback(
         return;
     }
 
-    /* extract filename from the path. it's the string behind the last '/'. */
-    char *filename = strrchr(remotepath1, '/');
-    filename++;
+    const std::string filename = get_filename(remotepath1);
 
     /* set this file's attributes. the "ne_prop_result_set *results" contains
         * the file attributes of all files of this collection (directory). this 
@@ -493,7 +498,7 @@ static void wdfs_readdir_propfind_callback(
     cache.update(remotepath, *cached_file);
 
     /* add directory entry */
-    if (ctx->filler(ctx->buf, filename, &cached_file->resource.stat, 0))
+    if (ctx->filler(ctx->buf, filename.c_str(), &cached_file->resource.stat, 0))
         fprintf(stderr, "## filler() error in %s()!\n", __func__);
 
     free_chars(&remotepath, &remotepath1, &remotepath2, NULL);
@@ -1194,6 +1199,7 @@ struct test_t {
     double b;
 };
 
+
 /* the main method does the option parsing using fuse_opt_parse(), establishes
  * the connection to the webdav resource and finally calls main_fuse(). */
 int main(int argc, char *argv[])
@@ -1206,12 +1212,23 @@ int main(int argc, char *argv[])
     if (fuse_opt_parse(&options, &wdfs, wdfs_opts, wdfs_opt_proc) == -1)
         exit(1);
 
-    if(char const* home = getenv("HOME")) {
-        wdfs.cache_folder = std::string(home) + "/" + ".wdfs/";
-    }
 
     if (!wdfs.webdav_resource) {
         fprintf(stderr, "%s: missing webdav uri\n", wdfs.program_name);
+        exit(1);
+    }
+    
+    if(char const* home = getenv("HOME")) {
+        auto hasher = std::hash<std::string>();
+        wdfs.cache_folder = std::string(home) + "/" + ".wdfs/" + std::to_string(hasher(wdfs.webdav_resource)) + "/";
+        int ret = system((std::string("mkdir -p ") + wdfs.cache_folder).c_str());
+        if (WEXITSTATUS(ret)) {
+            fprintf(stderr, "%s: can't create cache folder %s\n", wdfs.program_name, wdfs.cache_folder.c_str());
+            exit(1);
+        }
+    }
+    else {
+        fprintf(stderr, "%s: can't obtain HOME variable\n", wdfs.program_name);
         exit(1);
     }
 
@@ -1225,14 +1242,16 @@ int main(int argc, char *argv[])
             "wdfs settings:\n  program_name: %s\n  webdav_resource: %s\n"
             "  accept_certificate: %s\n  username: %s\n  password: %s\n"
             "  redirect: %s\n  locking_mode: %i\n"
-            "  locking_timeout: %i\n",
+            "  locking_timeout: %i\n"
+            "  cache folder: %s\n",
             wdfs.program_name,
             wdfs.webdav_resource ? wdfs.webdav_resource : "NULL",
             wdfs.accept_certificate == true ? "true" : "false",
             wdfs.username ? wdfs.username : "NULL",
             wdfs.password ? "****" : "NULL",
             wdfs.redirect == true ? "true" : "false",
-            wdfs.locking_mode, wdfs.locking_timeout);
+            wdfs.locking_mode, wdfs.locking_timeout,
+            wdfs.cache_folder.c_str());
     }
 
     /* set a nice name for /proc/mounts */
