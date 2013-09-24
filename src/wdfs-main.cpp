@@ -63,8 +63,8 @@ static int call_fuse_main(struct fuse_args *args);
 
 /* define package name and version if config.h is not available. */
 #ifndef HAVE_CONFIG_H
-	#define PACKAGE_NAME 	"wdfs"
-	#define PACKAGE_VERSION	"unknown"
+    #define PACKAGE_NAME 	"wdfs"
+    #define PACKAGE_VERSION	"unknown"
 #endif
 
 /* product string according RFC 2616, that is included in every request.     */
@@ -88,105 +88,105 @@ struct wdfs_conf wdfs = [] () {
 } ();
 
 enum {
-	KEY_HELP,
-	KEY_VERSION,
-	KEY_VERSION_FULL,
-	KEY_DEBUG,
-	KEY_LOCKING_MODE,
-	KEY_NOOP,
+    KEY_HELP,
+    KEY_VERSION,
+    KEY_VERSION_FULL,
+    KEY_DEBUG,
+    KEY_LOCKING_MODE,
+    KEY_NOOP,
 };
 
 #define WDFS_OPT(t, p, v) { t, offsetof(struct wdfs_conf, p), v }
 
 static struct fuse_opt wdfs_opts[] = {
-	FUSE_OPT_KEY("-h",				KEY_HELP),
-	FUSE_OPT_KEY("--help",			KEY_HELP),
-	FUSE_OPT_KEY("-v",				KEY_VERSION),
-	FUSE_OPT_KEY("--version",		KEY_VERSION),
-	FUSE_OPT_KEY("-vv",				KEY_VERSION_FULL),
-	FUSE_OPT_KEY("--all-versions",	KEY_VERSION_FULL),
-	FUSE_OPT_KEY("-D",				KEY_DEBUG),
-	FUSE_OPT_KEY("wdfs_debug",		KEY_DEBUG),
-	FUSE_OPT_KEY("-m %u",			KEY_LOCKING_MODE),
-	FUSE_OPT_KEY("-a",				KEY_NOOP),
-	WDFS_OPT("-D",					debug, true),
-	WDFS_OPT("wdfs_debug",			debug, true),
-	WDFS_OPT("-ac",					accept_certificate, true),
-	WDFS_OPT("accept_sslcert",		accept_certificate, true),
-	WDFS_OPT("-u %s",				username, 0),
-	WDFS_OPT("username=%s",			username, 0),
-	WDFS_OPT("-p %s",				password, 0),
-	WDFS_OPT("password=%s",			password, 0),
-	WDFS_OPT("no_redirect",			redirect, false),
-	WDFS_OPT("-l",					locking_mode, SIMPLE_LOCK),
-	WDFS_OPT("locking",				locking_mode, SIMPLE_LOCK),
-	WDFS_OPT("locking=0",			locking_mode, NO_LOCK),
-	WDFS_OPT("locking=none",		locking_mode, NO_LOCK),
-	WDFS_OPT("locking=1",			locking_mode, SIMPLE_LOCK),
-	WDFS_OPT("locking=simple",		locking_mode, SIMPLE_LOCK),
-	WDFS_OPT("locking=2",			locking_mode, ADVANCED_LOCK),
-	WDFS_OPT("locking=advanced",	locking_mode, ADVANCED_LOCK),
-	WDFS_OPT("locking=3",			locking_mode, ETERNITY_LOCK),
-	WDFS_OPT("locking=eternity",	locking_mode, ETERNITY_LOCK),
-	WDFS_OPT("-t %u",				locking_timeout, 300),
-	WDFS_OPT("locking_timeout=%u",	locking_timeout, 300),
-	FUSE_OPT_END
+    FUSE_OPT_KEY("-h",				KEY_HELP),
+    FUSE_OPT_KEY("--help",			KEY_HELP),
+    FUSE_OPT_KEY("-v",				KEY_VERSION),
+    FUSE_OPT_KEY("--version",		KEY_VERSION),
+    FUSE_OPT_KEY("-vv",				KEY_VERSION_FULL),
+    FUSE_OPT_KEY("--all-versions",	KEY_VERSION_FULL),
+    FUSE_OPT_KEY("-D",				KEY_DEBUG),
+    FUSE_OPT_KEY("wdfs_debug",		KEY_DEBUG),
+    FUSE_OPT_KEY("-m %u",			KEY_LOCKING_MODE),
+    FUSE_OPT_KEY("-a",				KEY_NOOP),
+    WDFS_OPT("-D",					debug, true),
+    WDFS_OPT("wdfs_debug",			debug, true),
+    WDFS_OPT("-ac",					accept_certificate, true),
+    WDFS_OPT("accept_sslcert",		accept_certificate, true),
+    WDFS_OPT("-u %s",				username, 0),
+    WDFS_OPT("username=%s",			username, 0),
+    WDFS_OPT("-p %s",				password, 0),
+    WDFS_OPT("password=%s",			password, 0),
+    WDFS_OPT("no_redirect",			redirect, false),
+    WDFS_OPT("-l",					locking_mode, SIMPLE_LOCK),
+    WDFS_OPT("locking",				locking_mode, SIMPLE_LOCK),
+    WDFS_OPT("locking=0",			locking_mode, NO_LOCK),
+    WDFS_OPT("locking=none",		locking_mode, NO_LOCK),
+    WDFS_OPT("locking=1",			locking_mode, SIMPLE_LOCK),
+    WDFS_OPT("locking=simple",		locking_mode, SIMPLE_LOCK),
+    WDFS_OPT("locking=2",			locking_mode, ADVANCED_LOCK),
+    WDFS_OPT("locking=advanced",	locking_mode, ADVANCED_LOCK),
+    WDFS_OPT("locking=3",			locking_mode, ETERNITY_LOCK),
+    WDFS_OPT("locking=eternity",	locking_mode, ETERNITY_LOCK),
+    WDFS_OPT("-t %u",				locking_timeout, 300),
+    WDFS_OPT("locking_timeout=%u",	locking_timeout, 300),
+    FUSE_OPT_END
 };
 
 static int wdfs_opt_proc(
-	void *data, const char *option, int key, struct fuse_args *option_list)
+    void *data, const char *option, int key, struct fuse_args *option_list)
 {
-	switch (key) {
-		case KEY_HELP:
-			print_help();
-			fuse_opt_add_arg(option_list, "-ho");
-			call_fuse_main(option_list);
-			exit(1);
+    switch (key) {
+        case KEY_HELP:
+            print_help();
+            fuse_opt_add_arg(option_list, "-ho");
+            call_fuse_main(option_list);
+            exit(1);
 
-		case KEY_VERSION:
-			fprintf(stderr, "%s version: %s\n", PACKAGE_NAME, PACKAGE_VERSION);
-			exit(0);
+        case KEY_VERSION:
+            fprintf(stderr, "%s version: %s\n", PACKAGE_NAME, PACKAGE_VERSION);
+            exit(0);
 
-		case KEY_VERSION_FULL:
-			fprintf(stderr, "%s version: %s\n", PACKAGE_NAME, PACKAGE_VERSION);
-			fprintf(stderr, "%s homepage: %s\n", PACKAGE_NAME, project_uri);
-			fprintf(stderr, "neon version: 0.%d\n", NEON_VERSION);
-			fuse_opt_add_arg(option_list, "--version");
-			call_fuse_main(option_list);
-			exit(0);
+        case KEY_VERSION_FULL:
+            fprintf(stderr, "%s version: %s\n", PACKAGE_NAME, PACKAGE_VERSION);
+            fprintf(stderr, "%s homepage: %s\n", PACKAGE_NAME, project_uri);
+            fprintf(stderr, "neon version: 0.%d\n", NEON_VERSION);
+            fuse_opt_add_arg(option_list, "--version");
+            call_fuse_main(option_list);
+            exit(0);
 
-		case KEY_DEBUG:
-			return fuse_opt_add_arg(option_list, "-f");
+        case KEY_DEBUG:
+            return fuse_opt_add_arg(option_list, "-f");
 
-		case KEY_LOCKING_MODE:
-			if (option[3] != '\0' || option[2] < '0' || option[2] > '3') {
-				fprintf(stderr, "%s: unknown locking mode '%s'\n",
-				wdfs.program_name, option + 2);
-				exit(1);
-			} else {
-				wdfs.locking_mode = option[2] - '0';
-			}
-			return 0;
+        case KEY_LOCKING_MODE:
+            if (option[3] != '\0' || option[2] < '0' || option[2] > '3') {
+                fprintf(stderr, "%s: unknown locking mode '%s'\n",
+                wdfs.program_name, option + 2);
+                exit(1);
+            } else {
+                wdfs.locking_mode = option[2] - '0';
+            }
+            return 0;
 
-		case KEY_NOOP:
-			return 0;
+        case KEY_NOOP:
+            return 0;
 
-		case FUSE_OPT_KEY_NONOPT:
-			if (wdfs.webdav_resource == NULL && 
-					strncmp(option, "http", 4) == 0) {
-				wdfs.webdav_resource = strdup(option);
-				return 0;
-			}
-			return 1;
+        case FUSE_OPT_KEY_NONOPT:
+            if (wdfs.webdav_resource == NULL && 
+                    strncmp(option, "http", 4) == 0) {
+                wdfs.webdav_resource = strdup(option);
+                return 0;
+            }
+            return 1;
 
-		case FUSE_OPT_KEY_OPT:
-			return 1;
+        case FUSE_OPT_KEY_OPT:
+            return 1;
 
-		default:
-			fprintf(stderr, "%s: unknown option '%s'\n",
-				wdfs.program_name, option);
-			exit(1);
-	}
+        default:
+            fprintf(stderr, "%s: unknown option '%s'\n",
+                wdfs.program_name, option);
+            exit(1);
+    }
 }
 
 
@@ -205,8 +205,8 @@ struct readdir_ctx_t {
 struct file_t {
     file_t() : fd(-1), modified(false) {}
     
-	int fd;	/* this file's filehandle                            */
-	bool modified;	/* set true if the filehandle's content is modified  */
+    int fd;	/* this file's filehandle                            */
+    bool modified;	/* set true if the filehandle's content is modified  */
 };
 
 enum field_e {
@@ -253,15 +253,15 @@ static std::unique_ptr<char> get_remotepath(const char *localpath)
 /* returns a filehandle for read and write on success or -1 on error */
 static int get_filehandle()
 {
-	char dummyfile[] = "/tmp/wdfs-tmp-XXXXXX";
-	/* mkstemp() replaces XXXXXX by unique random chars and
-	 * returns a filehandle for reading and writing */
-	int fh = mkstemp(dummyfile);
-	if (fh == -1)
-		fprintf(stderr, "## mkstemp(%s) error\n", dummyfile);
-	if (unlink(dummyfile))
-		fprintf(stderr, "## unlink() error\n");
-	return fh;
+    char dummyfile[] = "/tmp/wdfs-tmp-XXXXXX";
+    /* mkstemp() replaces XXXXXX by unique random chars and
+        * returns a filehandle for reading and writing */
+    int fh = mkstemp(dummyfile);
+    if (fh == -1)
+        fprintf(stderr, "## mkstemp(%s) error\n", dummyfile);
+    if (unlink(dummyfile))
+        fprintf(stderr, "## unlink() error\n");
+    return fh;
 }
 
 const char* get_helper(const ne_prop_result_set *results, field_e field) {
@@ -276,57 +276,57 @@ static void set_stat(etag_t& etag, struct stat& stat, const ne_prop_result_set *
 {
     wdfs_dbg("%s()\n", __func__);
 
-	const char *resourcetype, *contentlength, *lastmodified, *creationdate/*, *executable*/, *modestr, *etagstr;
-    
-	assert(results);
+    const char *resourcetype, *contentlength, *lastmodified, *creationdate/*, *executable*/, *modestr, *etagstr;
 
-	/* get the values from the propfind result set */
-	resourcetype	= get_helper(results, TYPE);
-	contentlength	= get_helper(results, LENGTH);
-	lastmodified	= get_helper(results, MODIFIED);
-	creationdate	= get_helper(results, CREATION);
-// 	executable	    = get_helper(results, EXECUTE);
-	modestr	        = get_helper(results, PERMISSIONS);
+    assert(results);
+
+    /* get the values from the propfind result set */
+    resourcetype	= get_helper(results, TYPE);
+    contentlength	= get_helper(results, LENGTH);
+    lastmodified	= get_helper(results, MODIFIED);
+    creationdate	= get_helper(results, CREATION);
+    // 	executable	    = get_helper(results, EXECUTE);
+    modestr	        = get_helper(results, PERMISSIONS);
     etagstr         = get_helper(results, ETAG);
-    
+
     int mode = 0;
 
-	/* webdav collection == directory entry */
-	if (resourcetype != NULL && !strstr("<collection", resourcetype)) {
-		/* "DT_DIR << 12" equals "S_IFDIR" */
+    /* webdav collection == directory entry */
+    if (resourcetype != NULL && !strstr("<collection", resourcetype)) {
+        /* "DT_DIR << 12" equals "S_IFDIR" */
         mode = (modestr) ? atoi(modestr) : 0777;
         mode |= S_IFDIR;
-		stat.st_size = 4096;
-	} else {
+        stat.st_size = 4096;
+    } else {
         mode = (modestr) ? atoi(modestr) : 0666;
         mode |= S_IFREG;
         stat.st_size = (contentlength) ? atoll(contentlength) : 0;
-	}
-	
+    }
+
     stat.st_mode = mode;
 
-	stat.st_nlink = 1;
-	stat.st_atime = time(NULL);
+    stat.st_nlink = 1;
+    stat.st_atime = time(NULL);
 
-	if (lastmodified != NULL)
-		stat.st_mtime = ne_rfc1123_parse(lastmodified);
-	else
-		stat.st_mtime = 0;
+    if (lastmodified != NULL)
+        stat.st_mtime = ne_rfc1123_parse(lastmodified);
+    else
+        stat.st_mtime = 0;
 
-	if (creationdate != NULL)
-		stat.st_ctime = ne_iso8601_parse(creationdate);
-	else
-		stat.st_ctime = 0;
+    if (creationdate != NULL)
+        stat.st_ctime = ne_iso8601_parse(creationdate);
+    else
+        stat.st_ctime = 0;
 
-	/* calculate number of 512 byte blocks */
-	stat.st_blocks	= (stat.st_size + 511) / 512;
+    /* calculate number of 512 byte blocks */
+    stat.st_blocks	= (stat.st_size + 511) / 512;
 
-	/* no need to set a restrict mode, because fuse filesystems can
-	 * only be accessed by the user that mounted the filesystem.  */
-	stat.st_mode &= ~umask(0);
-	stat.st_uid = getuid();
-	stat.st_gid = getgid();
-    
+    /* no need to set a restrict mode, because fuse filesystems can
+        * only be accessed by the user that mounted the filesystem.  */
+    stat.st_mode &= ~umask(0);
+    stat.st_uid = getuid();
+    stat.st_gid = getgid();
+
     if (etagstr) etag.reset(etagstr);
 }
 
@@ -340,24 +340,24 @@ static int handle_redirect(std::unique_ptr<char>& remotepath)
 {
     wdfs_dbg("%s(%s)\n", __func__, remotepath.get());
 
-	/* get the current_uri and new_uri structs */
-	ne_uri current_uri;
-	ne_fill_server_uri(session, &current_uri);
-	const ne_uri *new_uri = ne_redirect_location(session);
+    /* get the current_uri and new_uri structs */
+    ne_uri current_uri;
+    ne_fill_server_uri(session, &current_uri);
+    const ne_uri *new_uri = ne_redirect_location(session);
 
-	if (strcasecmp(current_uri.host, new_uri->host)) {
-		fprintf(stderr,
-			"## error: wdfs does not support redirecting to another host!\n");
-		free_chars(&current_uri.host, &current_uri.scheme, NULL);
-		return -1;
-	}
+    if (strcasecmp(current_uri.host, new_uri->host)) {
+        fprintf(stderr,
+            "## error: wdfs does not support redirecting to another host!\n");
+        free_chars(&current_uri.host, &current_uri.scheme, NULL);
+        return -1;
+    }
 
-	/* can't use ne_uri_free() here, because only host and scheme are mallocd */
-	free_chars(&current_uri.host, &current_uri.scheme, NULL);
+    /* can't use ne_uri_free() here, because only host and scheme are mallocd */
+    free_chars(&current_uri.host, &current_uri.scheme, NULL);
 
-	/* set the new remotepath to the redirect target path */
-	remotepath.reset(ne_strdup(new_uri->path));
-	return 0;
+    /* set the new remotepath to the redirect target path */
+    remotepath.reset(ne_strdup(new_uri->path));
+    return 0;
 }
 
 
@@ -368,36 +368,36 @@ static int handle_redirect(std::unique_ptr<char>& remotepath)
  * specific file. it sets the file's attributes and and them to the cache. */
 static void wdfs_getattr_propfind_callback(
 #if NEON_VERSION >= 26
-	void *userdata, const ne_uri* href_uri, const ne_prop_result_set *results)
+    void *userdata, const ne_uri* href_uri, const ne_prop_result_set *results)
 #else
-	void *userdata, const char *remotepath, const ne_prop_result_set *results)
+    void *userdata, const char *remotepath, const ne_prop_result_set *results)
 #endif
 {
 #if NEON_VERSION >= 26
-	char *remotepath = ne_uri_unparse(href_uri);
+    char *remotepath = ne_uri_unparse(href_uri);
 #endif
 
     wdfs_dbg("%s(%s)\n", __func__, remotepath);  
 
-	struct stat *stat = reinterpret_cast<struct stat*>(userdata);
-	memset(stat, 0, sizeof(struct stat));
+    struct stat *stat = reinterpret_cast<struct stat*>(userdata);
+    memset(stat, 0, sizeof(struct stat));
 
-	assert(remotepath);
+    assert(remotepath);
 
     cache_t::item_p cached_file(new cache_t::item);
-	set_stat(cached_file->resource.etag, cached_file->resource.stat, results);
+    set_stat(cached_file->resource.etag, cached_file->resource.stat, results);
     if (cache_t::item_p old_file = cache.get(remotepath)) {
         if (cached_file->resource.etag == old_file->resource.etag) {
             cached_file->fd = old_file->fd;
         }
     }
-    
+
     cache.update(remotepath, *cached_file);
-    
+
     *stat = cached_file->resource.stat;
 
 #if NEON_VERSION >= 26
-	FREE(remotepath);
+    FREE(remotepath);
 #endif
 }
 
@@ -408,7 +408,7 @@ static void wdfs_getattr_propfind_callback(
 static int wdfs_getattr(const char *localpath, struct stat *stat)
 {
     wdfs_dbg("%s(%s)\n", __func__, localpath);      
-	assert(localpath && stat);
+    assert(localpath && stat);
 
     auto remotepath(get_remotepath(localpath));
     if (!remotepath) return -ENOMEM;
@@ -435,7 +435,7 @@ static int wdfs_getattr(const char *localpath, struct stat *stat)
         }
     }
 
-	return 0;
+    return 0;
 }
 
 /* this method is called by ne_simple_propfind() from wdfs_readdir() for each 
@@ -444,44 +444,44 @@ static int wdfs_getattr(const char *localpath, struct stat *stat)
  * filler method to add the file to the requested directory. */
 static void wdfs_readdir_propfind_callback(
 #if NEON_VERSION >= 26
-	void *userdata, const ne_uri* href_uri, const ne_prop_result_set *results)
+    void *userdata, const ne_uri* href_uri, const ne_prop_result_set *results)
 #else
-	void *userdata, const char *remotepath0, const ne_prop_result_set *results)
+    void *userdata, const char *remotepath0, const ne_prop_result_set *results)
 #endif
 {
 #if NEON_VERSION >= 26
-	char *remotepath = ne_uri_unparse(href_uri);
+    char *remotepath = ne_uri_unparse(href_uri);
 #else
-	char *remotepath = strdup(remotepath0);
+    char *remotepath = strdup(remotepath0);
 #endif
 
     wdfs_dbg("%s(%s)\n", __func__, remotepath);      
 
-	struct readdir_ctx_t *ctx = reinterpret_cast<readdir_ctx_t*>(userdata);
-	assert(ctx);
+    struct readdir_ctx_t *ctx = reinterpret_cast<readdir_ctx_t*>(userdata);
+    assert(ctx);
 
-	char *remotepath1 = unify_path(remotepath, UNESCAPE);
-	char *remotepath2 = unify_path(ctx->remotepath.get(), UNESCAPE);
-	if (remotepath1 == NULL || remotepath2 == NULL) {
-		free_chars(&remotepath, &remotepath1, &remotepath2, NULL);
-		fprintf(stderr, "## fatal error: unify_path() returned NULL\n");
-		return;
-	}
+    char *remotepath1 = unify_path(remotepath, UNESCAPE);
+    char *remotepath2 = unify_path(ctx->remotepath.get(), UNESCAPE);
+    if (remotepath1 == NULL || remotepath2 == NULL) {
+        free_chars(&remotepath, &remotepath1, &remotepath2, NULL);
+        fprintf(stderr, "## fatal error: unify_path() returned NULL\n");
+        return;
+    }
 
-	/* don't add this directory to itself */
-	if (!strcmp(remotepath2, remotepath1)) {
-		free_chars(&remotepath, &remotepath1, &remotepath2, NULL);
-		return;
-	}
+    /* don't add this directory to itself */
+    if (!strcmp(remotepath2, remotepath1)) {
+        free_chars(&remotepath, &remotepath1, &remotepath2, NULL);
+        return;
+    }
 
-	/* extract filename from the path. it's the string behind the last '/'. */
-	char *filename = strrchr(remotepath1, '/');
-	filename++;
+    /* extract filename from the path. it's the string behind the last '/'. */
+    char *filename = strrchr(remotepath1, '/');
+    filename++;
 
-	/* set this file's attributes. the "ne_prop_result_set *results" contains
-	 * the file attributes of all files of this collection (directory). this 
-	 * performs better then single requests for each file in getattr().  */
-    
+    /* set this file's attributes. the "ne_prop_result_set *results" contains
+        * the file attributes of all files of this collection (directory). this 
+        * performs better then single requests for each file in getattr().  */
+
     cache_t::item_p cached_file(new cache_t::item);
     set_stat(cached_file->resource.etag, cached_file->resource.stat, results);
     if (cache_t::item_p old_file = cache.get(remotepath)) {
@@ -489,14 +489,14 @@ static void wdfs_readdir_propfind_callback(
             cached_file->fd = old_file->fd;
         }
     }
-    
-    cache.update(remotepath, *cached_file);
-    
-	/* add directory entry */
-	if (ctx->filler(ctx->buf, filename, &cached_file->resource.stat, 0))
-		fprintf(stderr, "## filler() error in %s()!\n", __func__);
 
-	free_chars(&remotepath, &remotepath1, &remotepath2, NULL);
+    cache.update(remotepath, *cached_file);
+
+    /* add directory entry */
+    if (ctx->filler(ctx->buf, filename, &cached_file->resource.stat, 0))
+        fprintf(stderr, "## filler() error in %s()!\n", __func__);
+
+    free_chars(&remotepath, &remotepath1, &remotepath2, NULL);
 }
 
 
@@ -505,45 +505,45 @@ static void wdfs_readdir_propfind_callback(
  * all files of the requested collection. for each file the method 
  * wdfs_readdir_propfind_callback() is called. */
 static int wdfs_readdir(
-	const char *localpath, void *buf, fuse_fill_dir_t filler,
-	off_t offset, struct fuse_file_info *fi)
+    const char *localpath, void *buf, fuse_fill_dir_t filler,
+    off_t offset, struct fuse_file_info *fi)
 {
     wdfs_dbg("%s(%s)\n", __func__, localpath);      
-	assert(localpath && filler);
+    assert(localpath && filler);
 
-	struct readdir_ctx_t ctx = {
+    struct readdir_ctx_t ctx = {
         buf,
         filler,
         get_remotepath(localpath)
     };
 
-	if (!ctx.remotepath) return -ENOMEM;
+    if (!ctx.remotepath) return -ENOMEM;
 
 
-	int ret = ne_simple_propfind(
-		session, ctx.remotepath.get(), NE_DEPTH_ONE,
-		&prop_names[0], wdfs_readdir_propfind_callback, &ctx);
-	/* handle the redirect and retry the propfind with the redirect target */
-	if (ret == NE_REDIRECT && wdfs.redirect == true) {
-		if (handle_redirect(ctx.remotepath))
-			return -ENOENT;
-		ret = ne_simple_propfind(
-			session, ctx.remotepath.get(), NE_DEPTH_ONE,
-			&prop_names[0], wdfs_readdir_propfind_callback, &ctx);
-	}
-	if (ret != NE_OK) {
-			fprintf(stderr, "## PROPFIND error in %s(): %s\n",
-				__func__, ne_get_error(session));
-		return -ENOENT;
-	}
+    int ret = ne_simple_propfind(
+        session, ctx.remotepath.get(), NE_DEPTH_ONE,
+        &prop_names[0], wdfs_readdir_propfind_callback, &ctx);
+    /* handle the redirect and retry the propfind with the redirect target */
+    if (ret == NE_REDIRECT && wdfs.redirect == true) {
+        if (handle_redirect(ctx.remotepath))
+            return -ENOENT;
+        ret = ne_simple_propfind(
+            session, ctx.remotepath.get(), NE_DEPTH_ONE,
+            &prop_names[0], wdfs_readdir_propfind_callback, &ctx);
+    }
+    if (ret != NE_OK) {
+            fprintf(stderr, "## PROPFIND error in %s(): %s\n",
+                __func__, ne_get_error(session));
+        return -ENOENT;
+    }
 
-	struct stat st;
-	memset(&st, 0, sizeof(st));
-	st.st_mode = S_IFDIR | 0777;
-	filler(buf, ".", &st, 0);
-	filler(buf, "..", &st, 0);
+    struct stat st;
+    memset(&st, 0, sizeof(st));
+    st.st_mode = S_IFDIR | 0777;
+    filler(buf, ".", &st, 0);
+    filler(buf, "..", &st, 0);
 
-	return 0;
+    return 0;
 }
 
 
@@ -555,15 +555,15 @@ static int wdfs_open(const char *localpath, struct fuse_file_info *fi)
     wdfs_dbg("%s(%s)\n", __func__, localpath); 
     wdfs_pr("   ++ by PID %d\n", fuse_get_context()->pid);
 
-	assert(localpath && fi);
+    assert(localpath && fi);
 
-	std::unique_ptr<file_t> file(new file_t);
+    std::unique_ptr<file_t> file(new file_t);
 
-	auto remotepath = get_remotepath(localpath);
-	if (!remotepath) return -ENOMEM;
+    auto remotepath = get_remotepath(localpath);
+    if (!remotepath) return -ENOMEM;
 
     webdav_resource_t resource_full; //resource from PROPFIND request
-	webdav_resource_t resource_new;
+    webdav_resource_t resource_new;
     if (get_head(session, remotepath.get(), &resource_new)) return -ENOENT;
 
     if (auto cached_file = cache.get(remotepath.get())) {
@@ -637,50 +637,50 @@ static int wdfs_open(const char *localpath, struct fuse_file_info *fi)
         cache.update(remotepath.get(), cached_file);
     }
 
-    
-	/* save our "struct open_file" to the fuse filehandle
-	 * this looks like a dirty hack too me, but it's the fuse way... */
-	fi->fh = reinterpret_cast<uint64_t>(file.release());
 
-	return 0;
+    /* save our "struct open_file" to the fuse filehandle
+        * this looks like a dirty hack too me, but it's the fuse way... */
+    fi->fh = reinterpret_cast<uint64_t>(file.release());
+
+    return 0;
 }
 
 
 /* reads data from the filehandle with pread() to fulfill read requests */
 static int wdfs_read(
-	const char *localpath, char *buf, size_t size,
-	off_t offset, struct fuse_file_info *fi)
+    const char *localpath, char *buf, size_t size,
+    off_t offset, struct fuse_file_info *fi)
 {
     wdfs_dbg("%s(%s)\n", __func__, localpath); 
-	assert(localpath && buf && fi);
+    assert(localpath && buf && fi);
 
-	file_t *file = reinterpret_cast<file_t*>(fi->fh);
+    file_t *file = reinterpret_cast<file_t*>(fi->fh);
 
-	int ret = pread(file->fd, buf, size, offset);
-	if (ret < 0) wdfs_err("pread() error: %d\n", ret);
-    
-	return ret;
+    int ret = pread(file->fd, buf, size, offset);
+    if (ret < 0) wdfs_err("pread() error: %d\n", ret);
+
+    return ret;
 }
 
 
 /* writes data to the filehandle with pwrite() to fulfill write requests */
 static int wdfs_write(
-	const char *localpath, const char *buf, size_t size,
-	off_t offset, struct fuse_file_info *fi)
+    const char *localpath, const char *buf, size_t size,
+    off_t offset, struct fuse_file_info *fi)
 {
-	wdfs_dbg("%s(%s)\n", __func__, localpath); 
-	assert(localpath && buf && fi);
+    wdfs_dbg("%s(%s)\n", __func__, localpath); 
+    assert(localpath && buf && fi);
 
-	file_t *file = reinterpret_cast<file_t*>(fi->fh);
+    file_t *file = reinterpret_cast<file_t*>(fi->fh);
 
-	int ret = pwrite(file->fd, buf, size, offset);
-	if (ret < 0) wdfs_err("pwrite() error: %d\n", ret);
+    int ret = pwrite(file->fd, buf, size, offset);
+    if (ret < 0) wdfs_err("pwrite() error: %d\n", ret);
 
-	/* set this flag, to indicate that data has been modified and needs to be
-	 * put to the webdav server. */
-	file->modified = true;
+    /* set this flag, to indicate that data has been modified and needs to be
+        * put to the webdav server. */
+    file->modified = true;
 
-	return ret;
+    return ret;
 }
 
 
@@ -692,14 +692,14 @@ static int wdfs_release(const char *localpath, struct fuse_file_info *fi)
 {
     wdfs_dbg("%s(%s)\n", __func__, localpath); 
     assert(localpath);
-    
-	file_t *file = reinterpret_cast<file_t*>(fi->fh);
 
-	auto remotepath(get_remotepath(localpath));
-	if (!remotepath) return -ENOMEM;
+    file_t *file = reinterpret_cast<file_t*>(fi->fh);
 
-	/* put the file only to the server, if it was modified. */
-	if (file->modified == true) {
+    auto remotepath(get_remotepath(localpath));
+    if (!remotepath) return -ENOMEM;
+
+    /* put the file only to the server, if it was modified. */
+    if (file->modified == true) {
         
         {
             // Uploading file and updating cache to result values
@@ -719,32 +719,32 @@ static int wdfs_release(const char *localpath, struct fuse_file_info *fi)
         
         wdfs_dbg("%s(): PUT the file to the server\n", __func__); 
 
-		/* attributes for this file are no longer up to date.
-		 * so remove it from cache. */
-//         file_cache.remove(remotepath);//TODO FIXME
+        /* attributes for this file are no longer up to date.
+            * so remove it from cache. */
+    //         file_cache.remove(remotepath);//TODO FIXME
 
-		/* unlock if locking is enabled and mode is ADVANCED_LOCK, because data
-		 * has been read and writen and so now it's time to remove the lock. */
-		if (wdfs.locking_mode == ADVANCED_LOCK) {
-			if (unlockfile(remotepath.get())) {
-				return -EACCES;
-			}
-		}
-	}
+        /* unlock if locking is enabled and mode is ADVANCED_LOCK, because data
+            * has been read and writen and so now it's time to remove the lock. */
+        if (wdfs.locking_mode == ADVANCED_LOCK) {
+            if (unlockfile(remotepath.get())) {
+                return -EACCES;
+            }
+        }
+    }
 
-	/* if locking is enabled and mode is SIMPLE_LOCK, simple unlock on close() */
-	if (wdfs.locking_mode == SIMPLE_LOCK) {
-		if (unlockfile(remotepath.get())) {
-			return -EACCES;
-		}
-	}
+    /* if locking is enabled and mode is SIMPLE_LOCK, simple unlock on close() */
+    if (wdfs.locking_mode == SIMPLE_LOCK) {
+        if (unlockfile(remotepath.get())) {
+            return -EACCES;
+        }
+    }
 
-	/* close filehandle and free memory */
-// 	close(file->fd);//TODO FIXME refference count
-	FREE(file);
+    /* close filehandle and free memory */
+    // close(file->fd);//TODO FIXME refference count
+    FREE(file);
     fi->fh = 0;
 
-	return 0;
+    return 0;
 }
 
 
@@ -759,17 +759,17 @@ static int wdfs_truncate(const char *localpath, off_t size)
     wdfs_dbg("%s(%s)\n", __func__, localpath); 
     wdfs_pr("   ++ at offset %li\n", (long int)size);
 
-	assert(localpath);
+    assert(localpath);
 
-	/* the truncate procedure:
-	 *  1. get the complete file and write into fh_in
-	 *  2. read size bytes from fh_in to buffer
-	 *  3. write size bytes from buffer to fh_out
-	 *  4. read from fh_out and put file to the server
-	 */
+    /* the truncate procedure:
+        *  1. get the complete file and write into fh_in
+        *  2. read size bytes from fh_in to buffer
+        *  3. write size bytes from buffer to fh_out
+        *  4. read from fh_out and put file to the server
+        */
 
-	auto remotepath = get_remotepath(localpath);
-	if (!remotepath) return -ENOMEM;
+    auto remotepath = get_remotepath(localpath);
+    if (!remotepath) return -ENOMEM;
 
     if (auto cached_file = cache.get(remotepath.get())) {
         int fd = cached_file->fd;
@@ -787,7 +787,7 @@ static int wdfs_truncate(const char *localpath, off_t size)
             return 0;
         }
     }
-    
+
     int ret;
     int fh_in  = get_filehandle();
     int fh_out = get_filehandle();
@@ -830,11 +830,11 @@ static int wdfs_truncate(const char *localpath, off_t size)
         close(fh_out);
         return -EIO;
     }
-    
+
     close(fh_in);
     close(fh_out);
-    
-	return 0;
+
+    return 0;
 }
 
 
@@ -843,34 +843,34 @@ static int wdfs_truncate(const char *localpath, off_t size)
  * files. ftruncate is supported since wdfs 1.2.0 and needs at least 
  * fuse 2.5.0 and linux kernel 2.6.15. */
 static int wdfs_ftruncate(
-	const char *localpath, off_t size, struct fuse_file_info *fi)
+    const char *localpath, off_t size, struct fuse_file_info *fi)
 {
     wdfs_dbg("%s(%s)\n", __func__, localpath); 
-	assert(localpath && fi);
+    assert(localpath && fi);
 
-	auto remotepath = get_remotepath(localpath);
-	if (!remotepath) return -ENOMEM;
+    auto remotepath = get_remotepath(localpath);
+    if (!remotepath) return -ENOMEM;
 
-	struct file_t *file = (struct file_t*)(uintptr_t)fi->fh;
+    struct file_t *file = (struct file_t*)(uintptr_t)fi->fh;
 
-	if (int ret = ftruncate(file->fd, size)) {
-		fprintf(stderr, "## ftruncate() error: %d\n", ret);
-		return -EIO;
-	}
+    if (int ret = ftruncate(file->fd, size)) {
+        fprintf(stderr, "## ftruncate() error: %d\n", ret);
+        return -EIO;
+    }
 
-	/* set this flag, to indicate that data has been modified and needs to be
-	 * put to the webdav server. */
-	file->modified = true;
+    /* set this flag, to indicate that data has been modified and needs to be
+        * put to the webdav server. */
+    file->modified = true;
 
-	/* update the cache item of the ftruncate()d file */
+    /* update the cache item of the ftruncate()d file */
     cache_t::item_p cached_file = cache.get(remotepath.get());
     assert(cached_file);
-	cached_file->resource.stat.st_size = size;
-	/* calculate number of 512 byte blocks */
-	cached_file->resource.stat.st_blocks	= (cached_file->resource.stat.st_size + 511) / 512;
-	cache.update(remotepath.get(), *cached_file);
+    cached_file->resource.stat.st_size = size;
+    /* calculate number of 512 byte blocks */
+    cached_file->resource.stat.st_blocks	= (cached_file->resource.stat.st_size + 511) / 512;
+    cache.update(remotepath.get(), *cached_file);
 
-	return 0;
+    return 0;
 }
 
 
@@ -879,24 +879,24 @@ static int wdfs_ftruncate(
 static int wdfs_mknod(const char *localpath, mode_t mode, dev_t rdev)
 {
     wdfs_dbg("%s(%s)\n", __func__, localpath); 
-	assert(localpath);
+    assert(localpath);
 
-	auto remotepath = get_remotepath(localpath);
-	if (!remotepath) return -ENOMEM;
+    auto remotepath = get_remotepath(localpath);
+    if (!remotepath) return -ENOMEM;
 
-	int fh = get_filehandle();
-	if (fh == -1) {
-		return -EIO;
-	}
+    int fh = get_filehandle();
+    if (fh == -1) {
+        return -EIO;
+    }
 
-	if (ne_put(session, remotepath.get(), fh)) {
-		fprintf(stderr, "## PUT error: %s\n", ne_get_error(session));
-		close(fh);
-		return -EIO;
-	}
-	
-	close(fh);
-	return 0;
+    if (ne_put(session, remotepath.get(), fh)) {
+        fprintf(stderr, "## PUT error: %s\n", ne_get_error(session));
+        close(fh);
+        return -EIO;
+    }
+
+    close(fh);
+    return 0;
 }
 
 
@@ -905,17 +905,17 @@ static int wdfs_mknod(const char *localpath, mode_t mode, dev_t rdev)
 static int wdfs_mkdir(const char *localpath, mode_t mode)
 {
     wdfs_dbg("%s(%s)\n", __func__, localpath); 
-	assert(localpath);
+    assert(localpath);
 
-	auto remotepath = get_remotepath(localpath);
-	if (!remotepath) return -ENOMEM;
+    auto remotepath = get_remotepath(localpath);
+    if (!remotepath) return -ENOMEM;
 
-	if (ne_mkcol(session, remotepath.get())) {
-		fprintf(stderr, "MKCOL error: %s\n", ne_get_error(session));
-		return -ENOENT;
-	}
+    if (ne_mkcol(session, remotepath.get())) {
+        fprintf(stderr, "MKCOL error: %s\n", ne_get_error(session));
+        return -ENOENT;
+    }
 
-	return 0;
+    return 0;
 }
 
 
@@ -924,37 +924,37 @@ static int wdfs_mkdir(const char *localpath, mode_t mode)
 static int wdfs_unlink(const char *localpath)
 {
     wdfs_dbg("%s(%s)\n", __func__, localpath); 
-	assert(localpath);
+    assert(localpath);
 
-	auto remotepath = get_remotepath(localpath);
-	if (!remotepath) return -ENOMEM;
+    auto remotepath = get_remotepath(localpath);
+    if (!remotepath) return -ENOMEM;
 
-	/* unlock the file, to be able to unlink it */
-	if (wdfs.locking_mode != NO_LOCK) {
-		if (unlockfile(remotepath.get())) {
-			return -EACCES;
-		}
-	}
+    /* unlock the file, to be able to unlink it */
+    if (wdfs.locking_mode != NO_LOCK) {
+        if (unlockfile(remotepath.get())) {
+            return -EACCES;
+        }
+    }
 
-	int ret = ne_delete(session, remotepath.get());
-	if (ret == NE_REDIRECT && wdfs.redirect == true) {
-		if (handle_redirect(remotepath))
-			return -ENOENT;
-		ret = ne_delete(session, remotepath.get());
-	}
+    int ret = ne_delete(session, remotepath.get());
+    if (ret == NE_REDIRECT && wdfs.redirect == true) {
+        if (handle_redirect(remotepath))
+            return -ENOENT;
+        ret = ne_delete(session, remotepath.get());
+    }
 
-	/* file successfully deleted! remove it also from the cache. */
-	if (ret == 0) {
-		cache.remove(remotepath.get());
-	/* return more specific error message in case of permission problems */
-	} else if (!strcmp(ne_get_error(session), "403 Forbidden")) {
-		ret = -EPERM;
-	} else {
-		fprintf(stderr, "## DELETE error: %s\n", ne_get_error(session));
-		ret = -EIO;
-	}
+    /* file successfully deleted! remove it also from the cache. */
+    if (ret == 0) {
+        cache.remove(remotepath.get());
+    /* return more specific error message in case of permission problems */
+    } else if (!strcmp(ne_get_error(session), "403 Forbidden")) {
+        ret = -EPERM;
+    } else {
+        fprintf(stderr, "## DELETE error: %s\n", ne_get_error(session));
+        ret = -EIO;
+    }
 
-	return ret;
+    return ret;
 }
 
 
@@ -963,36 +963,36 @@ static int wdfs_unlink(const char *localpath)
 static int wdfs_rename(const char *localpath_src, const char *localpath_dest)
 {
     wdfs_dbg("%s(%s -> %s)\n", __func__, localpath_src, localpath_dest); 
-	assert(localpath_src && localpath_dest);
+    assert(localpath_src && localpath_dest);
 
-	auto remotepath_src  = get_remotepath(localpath_src);
-	auto remotepath_dest = get_remotepath(localpath_dest);
-	if (!remotepath_src || !remotepath_dest) return -ENOMEM;
+    auto remotepath_src  = get_remotepath(localpath_src);
+    auto remotepath_dest = get_remotepath(localpath_dest);
+    if (!remotepath_src || !remotepath_dest) return -ENOMEM;
 
-	/* unlock the source file, before renaming */
-	if (wdfs.locking_mode != NO_LOCK) {
-		if (unlockfile(remotepath_src.get())) {
-			return -EACCES;
-		}
-	}
+    /* unlock the source file, before renaming */
+    if (wdfs.locking_mode != NO_LOCK) {
+        if (unlockfile(remotepath_src.get())) {
+            return -EACCES;
+        }
+    }
 
-	int ret = ne_move(session, 1, remotepath_src.get(), remotepath_dest.get());
-	if (ret == NE_REDIRECT && wdfs.redirect == true) {
-		if (handle_redirect(remotepath_src))
-			return -ENOENT;
-		ret = ne_move(session, 1, remotepath_src.get(), remotepath_dest.get());
-	}
+    int ret = ne_move(session, 1, remotepath_src.get(), remotepath_dest.get());
+    if (ret == NE_REDIRECT && wdfs.redirect == true) {
+        if (handle_redirect(remotepath_src))
+            return -ENOENT;
+        ret = ne_move(session, 1, remotepath_src.get(), remotepath_dest.get());
+    }
 
-	if (ret == 0) {
-		/* rename was successful and the source file no longer exists.
-		 * hence, remove it from the cache. */
-		cache.remove(remotepath_src.get());
-	} else {
-		fprintf(stderr, "## MOVE error: %s\n", ne_get_error(session));
-		ret = -EIO;
-	}
+    if (ret == 0) {
+        /* rename was successful and the source file no longer exists.
+            * hence, remove it from the cache. */
+        cache.remove(remotepath_src.get());
+    } else {
+        fprintf(stderr, "## MOVE error: %s\n", ne_get_error(session));
+        ret = -EIO;
+    }
 
-	return ret;
+    return ret;
 }
 
 
@@ -1005,7 +1005,7 @@ int wdfs_chmod(const char *localpath, mode_t mode)
     const std::string mode_str = std::to_string(mode);
     const std::string exec_str = (mode & S_IXUSR || mode & S_IXGRP || mode &S_IXOTH) ? "T" : "F";
     
-	const ne_proppatch_operation ops[] = {
+    const ne_proppatch_operation ops[] = {
         {
             &prop_names[EXECUTE],
             ne_propset,
@@ -1033,7 +1033,7 @@ int wdfs_chmod(const char *localpath, mode_t mode)
     cached_file->resource = ctx.resource;
     cache.update(remotepath.get(), *cached_file);
     
-	return 0;
+    return 0;
 }
 
 
@@ -1046,7 +1046,7 @@ static int wdfs_setattr(const char *localpath, struct utimbuf *buf)
     wdfs_dbg("%s(%s)\n", __func__, localpath);
     assert(localpath);
 
-	return 0;
+    return 0;
 }
 
 
@@ -1056,21 +1056,21 @@ static int wdfs_statfs(const char *localpath, struct statvfs *buf)
     wdfs_dbg("%s(%s)\n", __func__, localpath);
     assert(localpath);
 
-	/* taken from sshfs v1.7, thanks miklos! */
-	buf->f_bsize = 512;
-	buf->f_blocks = buf->f_bfree = buf->f_bavail =
-		1000ULL * 1024 * 1024 * 1024 / buf->f_bsize;
-	buf->f_files = buf->f_ffree = 1000000000;
+    /* taken from sshfs v1.7, thanks miklos! */
+    buf->f_bsize = 512;
+    buf->f_blocks = buf->f_bfree = buf->f_bavail =
+        1000ULL * 1024 * 1024 * 1024 / buf->f_bsize;
+    buf->f_files = buf->f_ffree = 1000000000;
 
-	return 0;
+    return 0;
 }
 
 
 /* just say hello when fuse takes over control. */
 #if FUSE_VERSION >= 26
-	static void* wdfs_init(struct fuse_conn_info *conn)
+    static void* wdfs_init(struct fuse_conn_info *conn)
 #else
-	static void* wdfs_init()
+    static void* wdfs_init()
 #endif
 {
     wdfs_dbg("%s()\n", __func__);
@@ -1086,7 +1086,7 @@ static int wdfs_statfs(const char *localpath, struct statvfs *buf)
 
     wdfs_dbg("%s() restored cache size: %d\n", __func__, cache.size());
 
-	return NULL;
+    return NULL;
 }
 
 
@@ -1105,10 +1105,10 @@ static void wdfs_destroy(void*)
         wdfs_dbg("%s(): can't save cache\n", __func__);
     }
     
-	/* free globaly used memory */
-	unlock_all_files();
-	ne_session_destroy(session);
-	FREE(remotepath_basedir);
+    /* free globaly used memory */
+    unlock_all_files();
+    ne_session_destroy(session);
+    FREE(remotepath_basedir);
 }
 
 static struct fuse_operations wdfs_operations  = [] () {
@@ -1145,7 +1145,7 @@ static struct fuse_operations wdfs_operations  = [] () {
  * help information. */
 static void print_help()
 {
-	fprintf(stderr,
+    fprintf(stderr,
 "usage: %s http[s]://server[:port][/directory/] mountpoint [options]\n\n"
 "wdfs options:\n"
 "    -v, --version          show version of wdfs\n"
@@ -1175,7 +1175,7 @@ static void print_help()
 "    -l                     same as -o locking=simple\n"
 "    -m locking_mode        same as -o locking=mode (only numerical modes)\n"
 "    -t seconds             same as -o locking_timeout=sec\n\n",
-	wdfs.program_name);
+    wdfs.program_name);
 }
 
 
@@ -1183,9 +1183,9 @@ static void print_help()
 static int call_fuse_main(struct fuse_args *args)
 {
 #if FUSE_VERSION >= 26
-	return fuse_main(args->argc, args->argv, &wdfs_operations, NULL);
+    return fuse_main(args->argc, args->argv, &wdfs_operations, NULL);
 #else
-	return fuse_main(args->argc, args->argv, &wdfs_operations);
+    return fuse_main(args->argc, args->argv, &wdfs_operations);
 #endif
 }
 
@@ -1198,73 +1198,73 @@ struct test_t {
  * the connection to the webdav resource and finally calls main_fuse(). */
 int main(int argc, char *argv[])
 {
-	int status_program_exec = 1;
+    int status_program_exec = 1;
 
-	struct fuse_args options = FUSE_ARGS_INIT(argc, argv);
-	wdfs.program_name = argv[0];
+    struct fuse_args options = FUSE_ARGS_INIT(argc, argv);
+    wdfs.program_name = argv[0];
 
-	if (fuse_opt_parse(&options, &wdfs, wdfs_opts, wdfs_opt_proc) == -1)
-		exit(1);
+    if (fuse_opt_parse(&options, &wdfs, wdfs_opts, wdfs_opt_proc) == -1)
+        exit(1);
 
     if(char const* home = getenv("HOME")) {
         wdfs.cache_folder = std::string(home) + "/" + ".wdfs/";
     }
-    
-	if (!wdfs.webdav_resource) {
-		fprintf(stderr, "%s: missing webdav uri\n", wdfs.program_name);
-		exit(1);
-	}
 
-	if (wdfs.locking_timeout < -1 || wdfs.locking_timeout == 0) {
-		fprintf(stderr, "## error: timeout must be bigger than 0 or -1!\n");
-		exit(1);
-	}
+    if (!wdfs.webdav_resource) {
+        fprintf(stderr, "%s: missing webdav uri\n", wdfs.program_name);
+        exit(1);
+    }
 
-	if (wdfs.debug == true) {
-		fprintf(stderr, 
-			"wdfs settings:\n  program_name: %s\n  webdav_resource: %s\n"
-			"  accept_certificate: %s\n  username: %s\n  password: %s\n"
-			"  redirect: %s\n  locking_mode: %i\n"
-			"  locking_timeout: %i\n",
-			wdfs.program_name,
-			wdfs.webdav_resource ? wdfs.webdav_resource : "NULL",
-			wdfs.accept_certificate == true ? "true" : "false",
-			wdfs.username ? wdfs.username : "NULL",
-			wdfs.password ? "****" : "NULL",
-			wdfs.redirect == true ? "true" : "false",
-			wdfs.locking_mode, wdfs.locking_timeout);
-	}
+    if (wdfs.locking_timeout < -1 || wdfs.locking_timeout == 0) {
+        fprintf(stderr, "## error: timeout must be bigger than 0 or -1!\n");
+        exit(1);
+    }
 
-	/* set a nice name for /proc/mounts */
-	char *fsname = ne_concat("-ofsname=wdfs (", wdfs.webdav_resource, ")", NULL);
-	fuse_opt_add_arg(&options, fsname);
-	FREE(fsname);
+    if (wdfs.debug == true) {
+        fprintf(stderr, 
+            "wdfs settings:\n  program_name: %s\n  webdav_resource: %s\n"
+            "  accept_certificate: %s\n  username: %s\n  password: %s\n"
+            "  redirect: %s\n  locking_mode: %i\n"
+            "  locking_timeout: %i\n",
+            wdfs.program_name,
+            wdfs.webdav_resource ? wdfs.webdav_resource : "NULL",
+            wdfs.accept_certificate == true ? "true" : "false",
+            wdfs.username ? wdfs.username : "NULL",
+            wdfs.password ? "****" : "NULL",
+            wdfs.redirect == true ? "true" : "false",
+            wdfs.locking_mode, wdfs.locking_timeout);
+    }
 
-	/* ensure that wdfs is called in single thread mode */
-	fuse_opt_add_arg(&options, "-s");
+    /* set a nice name for /proc/mounts */
+    char *fsname = ne_concat("-ofsname=wdfs (", wdfs.webdav_resource, ")", NULL);
+    fuse_opt_add_arg(&options, fsname);
+    FREE(fsname);
 
-	/* wdfs must not use the fuse caching of names (entries) and attributes! */
-	fuse_opt_add_arg(&options, "-oentry_timeout=0");
-	fuse_opt_add_arg(&options, "-oattr_timeout=0");
+    /* ensure that wdfs is called in single thread mode */
+    fuse_opt_add_arg(&options, "-s");
 
-	/* reset parameters to avoid storing sensitive data in the process table */
-	int arg_number = 1;
-	for (; arg_number < argc; arg_number++)
-		memset(argv[arg_number], 0, strlen(argv[arg_number]));
+    /* wdfs must not use the fuse caching of names (entries) and attributes! */
+    fuse_opt_add_arg(&options, "-oentry_timeout=0");
+    fuse_opt_add_arg(&options, "-oattr_timeout=0");
 
-	/* set up webdav connection, exit on error */
-	if (setup_webdav_session(wdfs.webdav_resource, wdfs.username, wdfs.password)) {
-		status_program_exec = 1;
-		goto cleanup;
-	}
+    /* reset parameters to avoid storing sensitive data in the process table */
+    int arg_number = 1;
+    for (; arg_number < argc; arg_number++)
+        memset(argv[arg_number], 0, strlen(argv[arg_number]));
 
-	/* finally call fuse */
-	status_program_exec = call_fuse_main(&options);
+    /* set up webdav connection, exit on error */
+    if (setup_webdav_session(wdfs.webdav_resource, wdfs.username, wdfs.password)) {
+        status_program_exec = 1;
+        goto cleanup;
+    }
 
-	/* clean up and quit wdfs */
+    /* finally call fuse */
+    status_program_exec = call_fuse_main(&options);
+
+    /* clean up and quit wdfs */
 cleanup:
-	free_chars(&wdfs.webdav_resource, &wdfs.username, &wdfs.password, NULL);
-	fuse_opt_free_args(&options);
+    free_chars(&wdfs.webdav_resource, &wdfs.username, &wdfs.password, NULL);
+    fuse_opt_free_args(&options);
 
-	return status_program_exec;
+    return status_program_exec;
 }
