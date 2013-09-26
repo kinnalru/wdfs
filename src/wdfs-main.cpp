@@ -81,7 +81,6 @@ struct wdfs_conf wdfs = [] () {
     w.redirect = true;
     w.locking_mode = NO_LOCK;
     w.locking_timeout = 300;
-    w.webdav_resource = NULL;
     return w;
 } ();
 
@@ -170,9 +169,9 @@ static int wdfs_opt_proc(
             return 0;
 
         case FUSE_OPT_KEY_NONOPT:
-            if (wdfs.webdav_resource == NULL && 
+            if (wdfs.webdav_resource.empty() && 
                     strncmp(option, "http", 4) == 0) {
-                wdfs.webdav_resource = strdup(option);
+                wdfs.webdav_resource = option;
                 return 0;
             }
             else if (wdfs.mountpoint.empty()) {
@@ -1231,15 +1230,15 @@ int main(int argc, char *argv[])
         exit(1);
 
 
-    if (!wdfs.webdav_resource) {
+    if (wdfs.webdav_resource.empty()) {
         fprintf(stderr, "%s: missing webdav uri\n", wdfs.program_name);
         exit(1);
     }
     
     std::shared_ptr<ne_uri> uri(new ne_uri);
-    if (ne_uri_parse(wdfs.webdav_resource, uri.get())) {
+    if (ne_uri_parse(wdfs.webdav_resource.c_str(), uri.get())) {
         fprintf(stderr,
-            "## ne_uri_parse() error: invalid URI '%s'.\n", wdfs.webdav_resource);
+            "## ne_uri_parse() error: invalid URI '%s'.\n", wdfs.webdav_resource.c_str());
         exit(1);
     }
     
@@ -1273,7 +1272,7 @@ int main(int argc, char *argv[])
             "  locking_timeout: %i\n"
             "  cache folder: %s\n  mountpoint: %s\n",
             wdfs.program_name,
-            wdfs.webdav_resource ? wdfs.webdav_resource : "NULL",
+            !wdfs.webdav_resource.empty() ? wdfs.webdav_resource.c_str() : "NULL",
             wdfs.accept_certificate == true ? "true" : "false",
             !wdfs.username.empty() ? wdfs.username.c_str() : "NULL",
             !wdfs.password.empty() ? "****" : "NULL",
@@ -1283,7 +1282,7 @@ int main(int argc, char *argv[])
     }
 
     /* set a nice name for /proc/mounts */
-    char *fsname = ne_concat("-ofsname=wdfs (", wdfs.webdav_resource, ")", NULL);
+    char *fsname = ne_concat("-ofsname=wdfs (", wdfs.webdav_resource.c_str(), ")", NULL);
     fuse_opt_add_arg(&options, fsname);
     FREE(fsname);
 
@@ -1310,7 +1309,6 @@ int main(int argc, char *argv[])
 
     /* clean up and quit wdfs */
 cleanup:
-    free_chars(&wdfs.webdav_resource, NULL);
     fuse_opt_free_args(&options);
 
     return status_program_exec;

@@ -50,7 +50,7 @@ struct wdfs_conf {
     /* timeout for a lock in seconds */
     int locking_timeout;
     /* address of the webdav resource we are connecting to */
-    char *webdav_resource;
+    std::string webdav_resource;
     /* path to mountpoint */
     std::string mountpoint;
     /* path to folder where cache(attrs AND files) located */
