@@ -195,23 +195,12 @@ static int verify_ssl_certificate(
  * parameters username and password are used. if they were not passed they can
  * be entered interactively. this method returns 0 on success or -1 on error. */
 int setup_webdav_session(
-	const char *uri_string, const char *username, const char *password)
+	   ne_uri& uri, const std::string& username, const std::string& password)
 {
-	assert(uri_string);
+    assert(uri.scheme && uri.host && uri.path);    
 
-	auth_data.username = username;
-	auth_data.password = password;
-
-	/* parse the uri_string and return a uri struct */
-	ne_uri uri;
-	if (ne_uri_parse(uri_string, &uri)) {
-		fprintf(stderr,
-			"## ne_uri_parse() error: invalid URI '%s'.\n", uri_string);
-		ne_uri_free(&uri);
-		return -1;
-	}
-
-	assert(uri.scheme && uri.host && uri.path);
+	auth_data.username = username.c_str();
+	auth_data.password = password.c_str();
 
 	/* if no port was defined use the default port */
 	uri.port = uri.port ? uri.port : ne_uri_defaultport(uri.scheme);
@@ -236,7 +225,6 @@ int setup_webdav_session(
 		} else {
 			fprintf(stderr, "## error: neon ssl support is not enabled.\n");
 			ne_session_destroy(session);
-			ne_uri_free(&uri);
 			return -1;
 		}
 	}
@@ -252,7 +240,6 @@ int setup_webdav_session(
 	if (path == NULL) {
 		printf("## error: unify_path() returned NULL\n");
 		ne_session_destroy(session);
-		ne_uri_free(&uri);
 		return -1;
 	}
 
@@ -263,7 +250,7 @@ int setup_webdav_session(
 	int ret = ne_options(session, path, &capabilities);
 	if (ret != NE_OK) {
 		fprintf(stderr,
-			"## error: could not mount remote server '%s'. ", uri_string);
+			"## error: could not mount remote server '%s'. ", uri.host);
 		fprintf(stderr, "reason: %s", ne_get_error(session));
 		/* if we got a redirect, print the new destination uri and exit */
 		if (ret == NE_REDIRECT) {
@@ -274,7 +261,6 @@ int setup_webdav_session(
 		}
 		fprintf(stderr, ".\n");
 		ne_session_destroy(session);
-		ne_uri_free(&uri);
 		FREE(path);
 		return -1;
 	}
@@ -283,9 +269,8 @@ int setup_webdav_session(
 	/* is this a webdav server that fulfills webdav class 1? */
 	if (capabilities.dav_class1 != 1) {
 		fprintf(stderr, 
-			"## error: '%s' is not a webdav enabled server.\n", uri_string);
+			"## error: '%s' is not a webdav enabled server.\n", uri.host);
 		ne_session_destroy(session);
-		ne_uri_free(&uri);
 		return -1;
 	}
 
@@ -297,11 +282,9 @@ int setup_webdav_session(
 	remotepath_basedir = remove_ending_slashes(uri.path);
 	if (remotepath_basedir == NULL) {
 		ne_session_destroy(session);
-		ne_uri_free(&uri);
 		return -1;
 	}
 
-	ne_uri_free(&uri);
 	return 0;
 }
 

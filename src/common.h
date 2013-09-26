@@ -129,6 +129,8 @@ void free_chars(char **arg, ...);
 
 int mkdir_p(const std::string& path);
 
+std::pair<std::string, std::string> parse_netrc(const std::string& file, const std::string& host);
+
 /* takes an lvalue and sets it to NULL after freeing. taken from neon. */
 #define FREE(x) do { if ((x) != NULL) free((x)); (x) = NULL; } while (0)
 

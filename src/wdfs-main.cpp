@@ -78,8 +78,6 @@ struct wdfs_conf wdfs = [] () {
     struct wdfs_conf w;
     w.debug = false;
     w.accept_certificate = false;
-    w.username = NULL;
-    w.password = NULL;
     w.redirect = true;
     w.locking_mode = NO_LOCK;
     w.locking_timeout = 300;
@@ -1238,6 +1236,13 @@ int main(int argc, char *argv[])
         exit(1);
     }
     
+    std::shared_ptr<ne_uri> uri(new ne_uri);
+    if (ne_uri_parse(wdfs.webdav_resource, uri.get())) {
+        fprintf(stderr,
+            "## ne_uri_parse() error: invalid URI '%s'.\n", wdfs.webdav_resource);
+        exit(1);
+    }
+    
     if(char const* home = getenv("HOME")) {
         auto hasher = std::hash<std::string>();
         wdfs.cache_folder = std::string(home) + "/" + ".wdfs/" + std::to_string(hasher(wdfs.webdav_resource)) + "/";
@@ -1245,6 +1250,10 @@ int main(int argc, char *argv[])
             fprintf(stderr, "%s: can't create cache folder %s\n", wdfs.program_name, wdfs.cache_folder.c_str());
             exit(1);
         }
+        
+        auto up = parse_netrc(std::string(home) + "/.netrc", uri->host);
+        if (wdfs.username.empty()) wdfs.username = up.first;
+        if (wdfs.password.empty()) wdfs.password = up.second;
     }
     else {
         fprintf(stderr, "%s: can't obtain HOME variable\n", wdfs.program_name);
@@ -1266,8 +1275,8 @@ int main(int argc, char *argv[])
             wdfs.program_name,
             wdfs.webdav_resource ? wdfs.webdav_resource : "NULL",
             wdfs.accept_certificate == true ? "true" : "false",
-            wdfs.username ? wdfs.username : "NULL",
-            wdfs.password ? "****" : "NULL",
+            !wdfs.username.empty() ? wdfs.username.c_str() : "NULL",
+            !wdfs.password.empty() ? "****" : "NULL",
             wdfs.redirect == true ? "true" : "false",
             wdfs.locking_mode, wdfs.locking_timeout,
             wdfs.cache_folder.c_str(), wdfs.mountpoint.c_str());
@@ -1291,7 +1300,7 @@ int main(int argc, char *argv[])
         memset(argv[arg_number], 0, strlen(argv[arg_number]));
 
     /* set up webdav connection, exit on error */
-    if (setup_webdav_session(wdfs.webdav_resource, wdfs.username, wdfs.password)) {
+    if (setup_webdav_session(*uri, wdfs.username, wdfs.password)) {
         status_program_exec = 1;
         goto cleanup;
     }
@@ -1301,7 +1310,7 @@ int main(int argc, char *argv[])
 
     /* clean up and quit wdfs */
 cleanup:
-    free_chars(&wdfs.webdav_resource, &wdfs.username, &wdfs.password, NULL);
+    free_chars(&wdfs.webdav_resource, NULL);
     fuse_opt_free_args(&options);
 
     return status_program_exec;

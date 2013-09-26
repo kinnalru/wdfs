@@ -40,9 +40,9 @@ struct wdfs_conf {
     /* if set to "true" every certificate is accepted without asking the user */
     bool accept_certificate;
     /* username of the webdav resource */
-    char *username;
+    std::string username;
     /* password of the webdav resource */
-    char *password;
+    std::string password;
     /* if set to "true" enables http redirect support */
     bool redirect;
     /* locking mode of files */

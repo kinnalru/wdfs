@@ -4,6 +4,8 @@
 #include <stdarg.h>
 
 #include <memory>
+#include <fstream>
+#include <sstream>
 
 #include <glib.h>
 #include <ne_uri.h>
@@ -97,6 +99,30 @@ int mkdir_p(const std::string& path)
     int ret = system((std::string("mkdir -p ") + path.c_str()).c_str());
     return WEXITSTATUS(ret);
 }
+
+std::pair<std::string, std::string> parse_netrc(const std::string& file, const std::string& host)
+{
+    std::string username, password, line;
+    std::ifstream is(file);
+    
+    while(getline(is, line)) {
+        if (line.find(host) == std::string::npos) continue;
+        
+        std::stringstream ss(line);
+        std::string prev_token, token;
+        
+        while (ss >> token, token != prev_token) {
+            if (token == "login") ss >> username;
+            if (token == "password") ss >> password;
+            
+            prev_token = token;
+        }
+        
+        return std::make_pair(username, password);
+    }
+    return std::make_pair(std::string(), std::string());
+}
+
 
 
 
