@@ -251,22 +251,17 @@ static std::shared_ptr<char> get_remotepath(const char *localpath)
 }
 
 /* returns a filehandle for read and write on success or -1 on error */
-static int get_filehandle(const char* localpath = NULL)
+static int get_filehandle()
 {
-    if (localpath == NULL) {
-        char dummyfile[] = "/tmp/wdfs-tmp-XXXXXX";
-        /* mkstemp() replaces XXXXXX by unique random chars and
-            * returns a filehandle for reading and writing */
-        int fd = mkstemp(dummyfile);
-        if (fd == -1)
-            fprintf(stderr, "## mkstemp(%s) error\n", dummyfile);
-        if (unlink(dummyfile))
-            fprintf(stderr, "## unlink() error\n");
-        return fd;
-    }
-    else {
-        return cache->create_file(localpath);
-    }
+    char dummyfile[] = "/tmp/wdfs-tmp-XXXXXX";
+    /* mkstemp() replaces XXXXXX by unique random chars and
+        * returns a filehandle for reading and writing */
+    int fd = mkstemp(dummyfile);
+    if (fd == -1)
+        fprintf(stderr, "## mkstemp(%s) error\n", dummyfile);
+    if (unlink(dummyfile))
+        fprintf(stderr, "## unlink() error\n");
+    return fd;
 }
 
 std::string get_filename(const char* remotepath) {
@@ -582,32 +577,33 @@ static int wdfs_open(const char *localpath, struct fuse_file_info *fi)
         if (resource_new.etag != cached_file->resource.etag) {
             wdfs_pr("   -- ETag is diferent - invalidate cache\n");
             cache->remove(remotepath.get());
+            cached_file.reset();
         }
         else if (!resource_new.etag && resource_new.stat.st_mtime != cached_file->resource.stat.st_mtime) {
             wdfs_pr("   -- There no ETag supported and modtiem different - invalidate cache\n");
             cache->remove(remotepath.get());
+            cached_file.reset();
         }
         else if (resource_new.stat.st_size != cached_file->resource.stat.st_size) {
             wdfs_pr("   -- Filesize different - invalidate cache\n");
             cache->remove(remotepath.get());
+            cached_file.reset();
         }
         else if (cached_file->fd == -1) {
             wdfs_pr("   -- There is no file in cache - try to restore cache from disk...\n");
-            std::string cachepath = cache->cache_filename(remotepath.get());
-            wdfs_pr("   -- Trying to open file %s...\n", cachepath.c_str());            
-            int fd = open(cachepath.c_str(), O_RDWR);
-            if (fd != -1) {
-                wdfs_pr("   ++ Filecache +hit+ RESTORED\n");                        
-                cached_file->fd = fd;
-                file->fd = cached_file->fd;
-                cache->update(remotepath.get(), *cached_file);
-            }          
-            else {
+            cached_file = cache->restore(remotepath.get());
+            if (cached_file->fd == -1) {
                 wdfs_pr("   -- Filecache +miss+ NOT RESTORED\n");             
                 cache->remove(remotepath.get());
+                cached_file.reset();
+            }
+            else {
+                wdfs_pr("   -- Filecache +hit+ RESTORED %d\n", cached_file->fd);             
             }
         }
-        else if (resource_new.stat.st_mtime != cached_file->resource.stat.st_mtime) {
+        
+        
+        if (cached_file && resource_new.stat.st_mtime != cached_file->resource.stat.st_mtime) {
             wdfs_pr("   ++ ETag and sizes are same but modtime different - update cache\n");
             cached_file->resource.update_from(resource_new);
             cache->update(remotepath.get(), *cached_file);
@@ -620,7 +616,7 @@ static int wdfs_open(const char *localpath, struct fuse_file_info *fi)
     }
     else {
         wdfs_pr("   ++ Filecache +miss+ download file\n");
-        file->fd = get_filehandle(localpath);
+        file->fd = cache->create_file(localpath);
         if (file->fd == -1) return -EIO;
         
         /* try to lock, if locking is enabled and file is not below svn_basedir. */
@@ -676,8 +672,10 @@ static int wdfs_read(
 
     file_t *file = reinterpret_cast<file_t*>(fi->fh);
 
+    std::cerr << "read from fd:" << file->fd << std::endl;
+    
     int ret = pread(file->fd, buf, size, offset);
-    if (ret < 0) wdfs_err("pread() error: %d\n", ret);
+    if (ret < 0) wdfs_err("pread() error: %d\n", strerror(errno));
 
     return ret;
 }

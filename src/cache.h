@@ -81,6 +81,13 @@ public:
         }
     }
     
+    item_p restore(const std::string& path_raw) {
+        auto cached_file = get(path_raw);
+        cached_file->fd = ::open(cache_filename(path_raw).c_str(), O_RDWR);
+        update(path_raw, *cached_file);
+        return cached_file;
+    }
+    
     int create_file(const std::string& path_raw) const {
         const std::string path = cache_filename(path_raw);
         const char *filename = strrchr(path.c_str(), '/');
