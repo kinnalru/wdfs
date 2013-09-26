@@ -45,7 +45,7 @@ public:
     cache_t(const std::string& folder) : folder_(folder) {}
     
     std::string normalize(const std::string& path_raw) const {
-        std::unique_ptr<char> path(unify_path(path_raw.c_str(), UNESCAPE));
+        std::shared_ptr<char> path(unify_path(path_raw.c_str(), UNESCAPE), free);
         return std::string(path.get());
     }
 

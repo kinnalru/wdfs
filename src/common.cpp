@@ -30,7 +30,7 @@ char* unify_path(const char* path_in, int mode)
     char *path_out = NULL;
     
 
-    std::unique_ptr<char> path_tmp(strdup(path_in));
+    std::shared_ptr<char> path_tmp(strdup(path_in), free);
     if (!path_tmp.get())
         return NULL;
 
@@ -41,7 +41,7 @@ char* unify_path(const char* path_in, int mode)
      * example2:  before: "http://server.com"
      *            after:  ""                    */
     if (g_str_has_prefix(path_tmp.get(), "http")) {
-        std::unique_ptr<char> tmp0(strdup(path_in));
+        std::shared_ptr<char> tmp0(strdup(path_in), free);
         /* jump to the 1st '/' of http[s]:// */
         char *tmp1 = strchr(tmp0.get(), '/');
         /* jump behind '//' and get the next '/'. voila: the path! */

@@ -199,7 +199,7 @@ char *remotepath_basedir;
 struct readdir_ctx_t {
     void *buf;
     fuse_fill_dir_t filler;
-    std::unique_ptr<char> remotepath;
+    std::shared_ptr<char> remotepath;
 };
 
 /* infos about an open file. used by open(), read(), write() and release()   */
@@ -241,13 +241,13 @@ static const auto anonymous_prop_names = [] {
 } ();
 
 /* returns the malloc()ed escaped remotepath on success or NULL on error */
-static std::unique_ptr<char> get_remotepath(const char *localpath)
+static std::shared_ptr<char> get_remotepath(const char *localpath)
 {
     assert(localpath);
-    std::unique_ptr<char> remotepath(ne_concat(remotepath_basedir, localpath, NULL));
+    std::shared_ptr<char> remotepath(ne_concat(remotepath_basedir, localpath, NULL), free);
     return (remotepath) 
-        ? std::unique_ptr<char>(unify_path(remotepath.get(), ESCAPE | LEAVESLASH))
-        : std::unique_ptr<char>();
+        ? std::shared_ptr<char>(unify_path(remotepath.get(), ESCAPE | LEAVESLASH), free)
+        : std::shared_ptr<char>();
 }
 
 /* returns a filehandle for read and write on success or -1 on error */
@@ -348,7 +348,7 @@ static void set_stat(etag_t& etag, struct stat& stat, const ne_prop_result_set *
  * error if the current host and new host differ. returns 0 on success and -1 
  * on error. side effect: remotepath is freed on error. */
 // static int handle_redirect(char **remotepath)
-static int handle_redirect(std::unique_ptr<char>& remotepath)
+static int handle_redirect(std::shared_ptr<char>& remotepath)
 {
     wdfs_dbg("%s(%s)\n", __func__, remotepath.get());
 
@@ -1021,7 +1021,7 @@ int wdfs_chmod(const char *localpath, mode_t mode)
     wdfs_dbg("%s(%s)\n", __func__, localpath);
     assert(localpath);
     
-    std::unique_ptr<char> remotepath(get_remotepath(localpath));
+    auto remotepath = get_remotepath(localpath);
     const std::string mode_str = std::to_string(mode);
     const std::string exec_str = (mode & S_IXUSR || mode & S_IXGRP || mode &S_IXOTH) ? "T" : "F";
     
@@ -1235,7 +1235,7 @@ int main(int argc, char *argv[])
         exit(1);
     }
     
-    std::shared_ptr<ne_uri> uri(new ne_uri);
+    std::shared_ptr<ne_uri> uri(new ne_uri, ne_uri_free);
     if (ne_uri_parse(wdfs.webdav_resource.c_str(), uri.get())) {
         fprintf(stderr,
             "## ne_uri_parse() error: invalid URI '%s'.\n", wdfs.webdav_resource.c_str());
