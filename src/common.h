@@ -55,6 +55,13 @@ std::unique_ptr<T> from_string(const std::string& strdata) {
     return rawdata;
 }
 
+struct fuse_context_t {
+    char *buf;
+    size_t size;
+    off_t offset;
+    struct fuse_file_info *fi;
+};
+
 #define wrap_stat_field(field, type, object) \
     type field() const {return object.st_##field;}; \
     bool has_##field() const {return object.st_##field != 0;}; \
@@ -62,36 +69,13 @@ std::unique_ptr<T> from_string(const std::string& strdata) {
     
     
 class webdav_resource_t {
-    friend class boost::serialization::access;
-    
-    template<class Archive>
-    void serialize(Archive & ar, const unsigned int version)
-    {
-        ar & etag;
-        std::string statstr = to_string(stat);
-        ar & statstr;
-        if (auto startptr = from_string<struct stat>(statstr)) {
-            stat = *startptr;
-        }
-    }
+
     
 public:
-    webdav_resource_t() {
-        memset(&stat, 0, sizeof(struct stat));
-    };
-    
-    
-    wrap_stat_field(mtime, time_t, stat);
-    wrap_stat_field(size, off_t, stat);
-    
-    void update_from(const webdav_resource_t& other) {
-        etag = other.etag;
-        update_mtime(other.mtime());
-        update_size(other.size());
-    }
-    
-    etag_t etag;
+    webdav_resource_t() : accept_ranges(false) {};
+
     struct stat stat;
+    bool accept_ranges;
 };
 
 struct webdav_context_t {

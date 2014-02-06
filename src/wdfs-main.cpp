@@ -41,7 +41,7 @@
 
 #include "wdfs-main.h"
 #include "webdav.h"
-#include "cache.h"
+// #include "cache.h"
 
 
 
@@ -56,7 +56,7 @@
 #define ADVANCED_LOCK 2
 #define ETERNITY_LOCK 3
 
-std::unique_ptr<cache_t> cache;
+// std::unique_ptr<cache_t> cache;
 
 static void print_help();
 static int call_fuse_main(struct fuse_args *args);
@@ -68,7 +68,7 @@ static int call_fuse_main(struct fuse_args *args);
 #endif
 
 /* product string according RFC 2616, that is included in every request.     */
-const char *project_name = PACKAGE_NAME"/"PACKAGE_VERSION;
+const char *project_name = PACKAGE_NAME "/" PACKAGE_VERSION;
 
 /* homepage of this filesystem                                               */
 const char *project_uri = "http://noedler.de/projekte/wdfs/";
@@ -391,17 +391,9 @@ static void wdfs_getattr_propfind_callback(
 
     assert(remotepath);
 
-    cache_t::item_p cached_file(new cache_t::item);
-    set_stat(cached_file->resource.etag, cached_file->resource.stat, results);
-    if (cache_t::item_p old_file = cache->get(remotepath)) {
-        if (cached_file->resource.etag == old_file->resource.etag) {
-            cached_file->fd = old_file->fd;
-        }
-    }
-
-    cache->update(remotepath, *cached_file);
-
-    *stat = cached_file->resource.stat;
+    etag_t unused;
+    
+    set_stat(unused, *stat, results);
 
 #if NEON_VERSION >= 26
     FREE(remotepath);
@@ -420,26 +412,21 @@ static int wdfs_getattr(const char *localpath, struct stat *stat)
     auto remotepath(get_remotepath(localpath));
     if (!remotepath) return -ENOMEM;
 
-    if (auto cached_stat = cache->stat(remotepath.get())) {
-        *stat = *cached_stat;
-    } 
-    else {
-        int ret = ne_simple_propfind(
+    int ret = ne_simple_propfind(
+        session, remotepath.get(), NE_DEPTH_ZERO, &prop_names[0],
+        wdfs_getattr_propfind_callback, stat);
+    /* handle the redirect and retry the propfind with the new target */
+    if (ret == NE_REDIRECT && wdfs.redirect == true) {
+        if (handle_redirect(remotepath))
+            return -ENOENT;
+        ret = ne_simple_propfind(
             session, remotepath.get(), NE_DEPTH_ZERO, &prop_names[0],
             wdfs_getattr_propfind_callback, stat);
-        /* handle the redirect and retry the propfind with the new target */
-        if (ret == NE_REDIRECT && wdfs.redirect == true) {
-            if (handle_redirect(remotepath))
-                return -ENOENT;
-            ret = ne_simple_propfind(
-                session, remotepath.get(), NE_DEPTH_ZERO, &prop_names[0],
-                wdfs_getattr_propfind_callback, stat);
-        }
-        if (ret != NE_OK) {
-            fprintf(stderr, "## PROPFIND error in %s(): %s\n",
-                __func__, ne_get_error(session));
-            return -ENOENT;
-        }
+    }
+    if (ret != NE_OK) {
+        fprintf(stderr, "## PROPFIND error in %s(): %s\n",
+            __func__, ne_get_error(session));
+        return -ENOENT;
     }
 
     return 0;
@@ -487,18 +474,13 @@ static void wdfs_readdir_propfind_callback(
         * the file attributes of all files of this collection (directory). this 
         * performs better then single requests for each file in getattr().  */
 
-    cache_t::item_p cached_file(new cache_t::item);
-    set_stat(cached_file->resource.etag, cached_file->resource.stat, results);
-    if (cache_t::item_p old_file = cache->get(remotepath)) {
-        if (cached_file->resource.etag == old_file->resource.etag) {
-            cached_file->fd = old_file->fd;
-        }
-    }
-
-    cache->update(remotepath, *cached_file);
-
+    etag_t unused;
+    struct stat stat;
+    memset(&stat, 0, sizeof(struct stat));
+    set_stat(unused, stat, results);
+    
     /* add directory entry */
-    if (ctx->filler(ctx->buf, filename.c_str(), &cached_file->resource.stat, 0))
+    if (ctx->filler(ctx->buf, filename.c_str(), &stat, 0))
         fprintf(stderr, "## filler() error in %s()!\n", __func__);
 
     free_chars(&remotepath, &remotepath1, &remotepath2, NULL);
@@ -562,101 +544,32 @@ static int wdfs_open(const char *localpath, struct fuse_file_info *fi)
 
     assert(localpath && fi);
 
-    std::unique_ptr<file_t> file(new file_t);
-
     auto remotepath = get_remotepath(localpath);
     if (!remotepath) return -ENOMEM;
     
-    webdav_resource_t resource_full; //resource from PROPFIND request
-    webdav_resource_t resource_new;
-    if (get_head(session, remotepath.get(), &resource_new)) return -ENOENT;
+    webdav_resource_t unused;
+    if (get_head(session, remotepath.get(), &unused)) return -ENOENT;
 
-    if (auto cached_file = cache->get(remotepath.get())) {
-        resource_full = cached_file->resource;
-        
-        if (resource_new.etag != cached_file->resource.etag) {
-            wdfs_pr("   -- ETag is diferent - invalidate cache\n");
-            cache->remove(remotepath.get());
-            cached_file.reset();
-        }
-        else if (!resource_new.etag && resource_new.stat.st_mtime != cached_file->resource.stat.st_mtime) {
-            wdfs_pr("   -- There no ETag supported and modtiem different - invalidate cache\n");
-            cache->remove(remotepath.get());
-            cached_file.reset();
-        }
-        else if (resource_new.stat.st_size != cached_file->resource.stat.st_size) {
-            wdfs_pr("   -- Filesize different - invalidate cache\n");
-            cache->remove(remotepath.get());
-            cached_file.reset();
-        }
-        else if (cached_file->fd == -1) {
-            wdfs_pr("   -- There is no file in cache - try to restore cache from disk...\n");
-            cached_file = cache->restore(remotepath.get());
-            if (cached_file->fd == -1) {
-                wdfs_pr("   -- Filecache +miss+ NOT RESTORED\n");             
-                cache->remove(remotepath.get());
-                cached_file.reset();
-            }
-            else {
-                wdfs_pr("   -- Filecache +hit+ RESTORED %d\n", cached_file->fd);             
-            }
-        }
-        
-        
-        if (cached_file && resource_new.stat.st_mtime != cached_file->resource.stat.st_mtime) {
-            wdfs_pr("   ++ ETag and sizes are same but modtime different - update cache\n");
-            cached_file->resource.update_from(resource_new);
-            cache->update(remotepath.get(), *cached_file);
-        }
-    }
 
-    if (auto cached_file = cache->get(remotepath.get())) {
-        wdfs_pr("   ++ Filecache +hit+ no download needed\n");
-        file->fd = cached_file->fd;
-    }
-    else {
-        wdfs_pr("   ++ Filecache +miss+ download file\n");
-        file->fd = cache->create_file(localpath);
-        if (file->fd == -1) return -EIO;
-        
         /* try to lock, if locking is enabled and file is not below svn_basedir. */
-        if (wdfs.locking_mode != NO_LOCK) {
-            if (lockfile(remotepath.get(), wdfs.locking_timeout)) {
-                /* locking the file is not possible, because the file is locked by 
-                * somebody else. read-only access is allowed. */
-                if ((fi->flags & O_ACCMODE) == O_RDONLY) {
-                    fprintf(stderr,
-                        "## error: file %s is already locked. "
-                        "allowing read-only (O_RDONLY) access!\n", remotepath.get());
-                } else {
-                    return -EACCES;
-                }
-            }
-        }
+//         if (wdfs.locking_mode != NO_LOCK) {
+//             if (lockfile(remotepath.get(), wdfs.locking_timeout)) {
+//                 /* locking the file is not possible, because the file is locked by 
+//                 * somebody else. read-only access is allowed. */
+//                 if ((fi->flags & O_ACCMODE) == O_RDONLY) {
+//                     fprintf(stderr,
+//                         "## error: file %s is already locked. "
+//                         "allowing read-only (O_RDONLY) access!\n", remotepath.get());
+//                 } else {
+//                     return -EACCES;
+//                 }
+//             }
+//         }
 
-        webdav_context_t ctx{session};  
-        ctx.resource.etag.reset(""); //disable etag facility
-        hook_helper_t hooker(session, &ctx);
-        
-        /* GET the data to the filehandle even if the file is opened O_WRONLY,
-        * because the opening application could use pwrite() or use O_APPEND
-        * and than the data needs to be present. */   
-        if (ne_get(session, remotepath.get(), file->fd)) {
-            fprintf(stderr, "## GET error: %s\n", ne_get_error(session));
-            return -ENOENT;        
-        }
-
-        resource_full.update_from(resource_new);
-        resource_full.update_from(ctx.resource);
-        cached_file_t cached_file(resource_full, file->fd);
-        wdfs_pr("   ++ File downloaded successfuly\n");
-        cache->update(remotepath.get(), cached_file);
-    }
-
-
-    /* save our "struct open_file" to the fuse filehandle
+     /* save our "struct open_file" to the fuse filehandle
         * this looks like a dirty hack too me, but it's the fuse way... */
-    fi->fh = reinterpret_cast<uint64_t>(file.release());
+    //fi->fh = reinterpret_cast<uint64_t>(file.release());
+    fi->fh = 0;
 
     return 0;
 }
@@ -670,14 +583,18 @@ static int wdfs_read(
     wdfs_dbg("%s(%s)\n", __func__, localpath); 
     assert(localpath && buf && fi);
 
-    file_t *file = reinterpret_cast<file_t*>(fi->fh);
-
-    std::cerr << "read from fd:" << file->fd << std::endl;
+    auto remotepath = get_remotepath(localpath);
+    if (!remotepath) return -ENOMEM;
     
-    int ret = pread(file->fd, buf, size, offset);
-    if (ret < 0) wdfs_err("pread() error: %d\n", strerror(errno));
-
-    return ret;
+    struct fuse_context_t ctx = {
+        buf, size, offset, fi
+    };
+    
+    size_t readed = get(session, remotepath.get(), &ctx);
+    
+    if (readed < 0) return -ENOENT;
+    
+    return readed;
 }
 
 
@@ -689,16 +606,18 @@ static int wdfs_write(
     wdfs_dbg("%s(%s)\n", __func__, localpath); 
     assert(localpath && buf && fi);
 
-    file_t *file = reinterpret_cast<file_t*>(fi->fh);
-
-    int ret = pwrite(file->fd, buf, size, offset);
-    if (ret < 0) wdfs_err("pwrite() error: %d\n", ret);
-
-    /* set this flag, to indicate that data has been modified and needs to be
-        * put to the webdav server. */
-    file->modified = true;
-
-    return ret;
+    auto remotepath = get_remotepath(localpath);
+    if (!remotepath) return -ENOMEM;
+    
+    struct fuse_context_t ctx = {
+        const_cast<char*>(buf), size, offset, fi
+    };
+    
+    size_t writed = put(session, remotepath.get(), &ctx);
+    
+    if (writed < 0) return -ENOENT;
+    
+    return writed;
 }
 
 
@@ -711,55 +630,6 @@ static int wdfs_release(const char *localpath, struct fuse_file_info *fi)
     wdfs_dbg("%s(%s)\n", __func__, localpath); 
     assert(localpath);
 
-    file_t *file = reinterpret_cast<file_t*>(fi->fh);
-
-    auto remotepath(get_remotepath(localpath));
-    if (!remotepath) return -ENOMEM;
-
-    /* put the file only to the server, if it was modified. */
-    if (file->modified == true) {
-        
-        {
-            // Uploading file and updating cache to result values
-            auto cached_file = cache->get(remotepath.get());
-            
-            webdav_context_t ctx{session};  
-            hook_helper_t hooker(session, &ctx);
-            
-            if (ne_put(session, remotepath.get(), file->fd)) {
-                fprintf(stderr, "## PUT error: %s\n", ne_get_error(session));
-                return -EIO;
-            }
-            
-            cached_file->resource.update_from(ctx.resource);
-            cache->update(remotepath.get(), *cached_file);
-        }
-        
-        wdfs_dbg("%s(): PUT the file to the server\n", __func__); 
-
-        /* attributes for this file are no longer up to date.
-            * so remove it from cache. */
-    //         file_cache.remove(remotepath);//TODO FIXME
-
-        /* unlock if locking is enabled and mode is ADVANCED_LOCK, because data
-            * has been read and writen and so now it's time to remove the lock. */
-        if (wdfs.locking_mode == ADVANCED_LOCK) {
-            if (unlockfile(remotepath.get())) {
-                return -EACCES;
-            }
-        }
-    }
-
-    /* if locking is enabled and mode is SIMPLE_LOCK, simple unlock on close() */
-    if (wdfs.locking_mode == SIMPLE_LOCK) {
-        if (unlockfile(remotepath.get())) {
-            return -EACCES;
-        }
-    }
-
-    /* close filehandle and free memory */
-    // close(file->fd);//TODO FIXME refference count
-    FREE(file);
     fi->fh = 0;
 
     return 0;
@@ -788,23 +658,6 @@ static int wdfs_truncate(const char *localpath, off_t size)
 
     auto remotepath = get_remotepath(localpath);
     if (!remotepath) return -ENOMEM;
-
-    if (auto cached_file = cache->get(remotepath.get())) {
-        int fd = cached_file->fd;
-        if (fd != -1) {
-            if (int ret = ftruncate(fd, size)) {
-                fprintf(stderr, "## ftruncate() error: %d\n", ret);
-                return -EIO;                
-            }
-            else {
-                cached_file->resource.stat.st_size = size;
-                /* calculate number of 512 byte blocks */
-                cached_file->resource.stat.st_blocks = (cached_file->resource.stat.st_size + 511) / 512;
-                cache->update(remotepath.get(), *cached_file);
-            }
-            return 0;
-        }
-    }
 
     int ret;
     int fh_in  = get_filehandle();
@@ -864,31 +717,8 @@ static int wdfs_ftruncate(
     const char *localpath, off_t size, struct fuse_file_info *fi)
 {
     wdfs_dbg("%s(%s)\n", __func__, localpath); 
-    assert(localpath && fi);
 
-    auto remotepath = get_remotepath(localpath);
-    if (!remotepath) return -ENOMEM;
-
-    struct file_t *file = (struct file_t*)(uintptr_t)fi->fh;
-
-    if (int ret = ftruncate(file->fd, size)) {
-        fprintf(stderr, "## ftruncate() error: %d\n", ret);
-        return -EIO;
-    }
-
-    /* set this flag, to indicate that data has been modified and needs to be
-        * put to the webdav server. */
-    file->modified = true;
-
-    /* update the cache item of the ftruncate()d file */
-    cache_t::item_p cached_file = cache->get(remotepath.get());
-    assert(cached_file);
-    cached_file->resource.stat.st_size = size;
-    /* calculate number of 512 byte blocks */
-    cached_file->resource.stat.st_blocks	= (cached_file->resource.stat.st_size + 511) / 512;
-    cache->update(remotepath.get(), *cached_file);
-
-    return 0;
+    return wdfs_truncate(localpath, size);
 }
 
 
@@ -963,8 +793,7 @@ static int wdfs_unlink(const char *localpath)
 
     /* file successfully deleted! remove it also from the cache. */
     if (ret == 0) {
-        cache->remove(remotepath.get());
-    /* return more specific error message in case of permission problems */
+      /* return more specific error message in case of permission problems */
     } else if (!strcmp(ne_get_error(session), "403 Forbidden")) {
         ret = -EPERM;
     } else {
@@ -1004,7 +833,6 @@ static int wdfs_rename(const char *localpath_src, const char *localpath_dest)
     if (ret == 0) {
         /* rename was successful and the source file no longer exists.
             * hence, remove it from the cache. */
-        cache->remove(remotepath_src.get());
     } else {
         fprintf(stderr, "## MOVE error: %s\n", ne_get_error(session));
         ret = -EIO;
@@ -1037,19 +865,16 @@ int wdfs_chmod(const char *localpath, mode_t mode)
         {NULL}
     };
     
-    cache_t::item_p cached_file = cache->get(remotepath.get());
-    assert(cached_file);
+    webdav_resource_t unused;
+    webdav_context_t ctx{session, unused};  
     
-    webdav_context_t ctx{session, cached_file->resource};  
     hook_helper_t hooker(session, &ctx);
     
     if (ne_proppatch(session, remotepath.get(), ops)) {
         fprintf(stderr, "PROPPATCH error: %s\n", ne_get_error(session));
         return -ENOENT;
     }
-    
-    cached_file->resource = ctx.resource;
-    cache->update(remotepath.get(), *cached_file);
+
     
     return 0;
 }
@@ -1093,18 +918,16 @@ static int wdfs_statfs(const char *localpath, struct statvfs *buf)
 {
     wdfs_dbg("%s()\n", __func__);
 
-    cache.reset(new cache_t(wdfs.cache_folder));
 
     try {
-        std::ifstream stream((wdfs.cache_folder + "cache").c_str());
-        boost::archive::text_iarchive oa(stream);
-        oa >> *cache;
+//         std::ifstream stream((wdfs.cache_folder + "cache").c_str());
+//         boost::archive::text_iarchive oa(stream);
+//         oa >> *cache;
     }
     catch(const std::exception& e) {
         wdfs_dbg("%s(): can't load cache\n", __func__);
     }
 
-    wdfs_dbg("%s() restored cache size: %d\n", __func__, cache->size());
 
     return NULL;
 }
@@ -1117,9 +940,9 @@ static void wdfs_destroy(void*)
     wdfs_dbg("%s()\n", __func__);
 
     try {
-        std::ofstream stream((wdfs.cache_folder + "cache").c_str());
-        boost::archive::text_oarchive oa(stream);
-        oa << *cache;
+//         std::ofstream stream((wdfs.cache_folder + "cache").c_str());
+//         boost::archive::text_oarchive oa(stream);
+//         oa << *cache;
     }
     catch(const std::exception& e) {
         wdfs_dbg("%s(): can't save cache\n", __func__);

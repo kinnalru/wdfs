@@ -84,6 +84,17 @@ public:
     item_p restore(const std::string& path_raw) {
         auto cached_file = get(path_raw);
         cached_file->fd = ::open(cache_filename(path_raw).c_str(), O_RDWR);
+        if (cached_file->fd > 0) {
+            struct stat st;
+            memset(&st, 0, sizeof(struct stat));
+            ::fstat(cached_file->fd, &st);
+            if (st.st_size != cached_file->resource.stat.st_size) {
+                std::cerr << "size differs local:" << st.st_size << " remote:" << cached_file->resource.stat.st_size << std::endl;
+                ::close(cached_file->fd);
+                remove(path_raw);
+                return item_p();
+            }
+        }
         update(path_raw, *cached_file);
         return cached_file;
     }

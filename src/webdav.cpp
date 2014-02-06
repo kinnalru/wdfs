@@ -426,42 +426,21 @@ void unlock_all_files()
 }
 
 inline void fill_resource(webdav_resource_t* resource, ne_request* request) {
-    const char *etag = ne_get_response_header(request, "ETag");
-    if (etag) 
-        resource->etag = normalize_etag(etag);
-
     const char *lastmodified = ne_get_response_header(request, "Last-Modified");
     if (!lastmodified) lastmodified = ne_get_response_header(request, "Date");
+    
+    const char *range = ne_get_response_header(request, "Accept-Ranges");
+    if (range && std::string(range) != "none" )
+        resource->accept_ranges = true;
 
     resource->stat.st_mtime = (lastmodified)
         ? ne_rfc1123_parse(lastmodified)
-        : 0;
-        
-    const char *contentlength = ne_get_response_header(request, "Content-Length");
-    
-    resource->stat.st_size = (contentlength)
-        ? atoll(contentlength)
         : 0;
 }
 
 void create_request_handler(ne_request *req, void *userdata, const char *method, const char *requri)
 {
     webdav_context_t* ctx = reinterpret_cast<webdav_context_t*>(userdata);
-    
-    if (!ctx->resource.etag) {
-        //there is no e tag - MUST no resource on server
-        //do nothing(304) if ANY version already on server
-        ne_add_request_header(req, "If-None-Match", "*"); 
-    }
-    else {
-        if (ctx->resource.etag->empty()) {
-            //etag facility disabled
-        }
-        else {
-            //do nothing(304) if etag mismatch
-            ne_add_request_header(req, "If-Match", ctx->resource.etag->c_str());
-        }
-    }
 }
 
 int post_send_handler(ne_request* request, void* userdata, const ne_status* status)
@@ -480,7 +459,7 @@ int get_head(ne_session* session, const std::string& path, webdav_resource_t* re
 
     int neon_stat = ne_request_dispatch(request.get());
 
-    if (ne_request_dispatch(request.get()) != NE_OK) {
+    if (neon_stat != NE_OK) {
         return neon_stat;
     }
 
@@ -489,6 +468,74 @@ int get_head(ne_session* session, const std::string& path, webdav_resource_t* re
     return 0;
 }
 
+int httpResponseReader(void *userdata, const char *buf, size_t len)
+{
+//     fuse_context_t* ctx = reinterpret_cast<fuse_context_t*>(userdata);
+    std::vector<char>* data = reinterpret_cast<std::vector<char>*>(userdata);
+    data->insert(data->end(), buf, buf + len);
+
+    return 0;
+}
+
+size_t get(ne_session* session, const std::string& path, fuse_context_t* ctx)
+{
+    std::shared_ptr<ne_request> request(
+        ne_request_create(session, "GET", path.c_str()),
+        ne_request_destroy
+    );
+
+    char buffer [50];
+    int n = sprintf(buffer, "bytes=%d-%d", ctx->offset, ctx->offset + ctx->size);
+    
+    ne_add_request_header(request.get(), "Range", std::string(buffer, n).c_str());
+
+    
+    std::vector<char> data;
+    
+    ne_add_response_body_reader(request.get(), ne_accept_always, httpResponseReader, &data);
+    
+    int neon_stat = ne_request_dispatch(request.get());
+
+    if (neon_stat != NE_OK) {
+        return -neon_stat;
+    }
+    
+    memcpy(ctx->buf, data.data(), data.size());
+    
+    return data.size();
+}
+
+
+size_t put(ne_session* session, const std::string& path, fuse_context_t* ctx)
+{
+    std::shared_ptr<ne_request> request(
+        ne_request_create(session, "PUT", path.c_str()),
+        ne_request_destroy
+    );
+
+    ne_add_request_header(request.get(), "Content-type", "text/xml");
+    ne_set_request_body_buffer(req, data.c_str(), data.size());
+    
+    char buffer [50];
+    int n = sprintf(buffer, "bytes=%d-%d", ctx->offset, ctx->offset + ctx->size);
+    
+    ne_add_request_header(request.get(), "Range", std::string(buffer, n).c_str());
+
+    
+    std::vector<char> data;
+    
+    ne_add_response_body_reader(request.get(), ne_accept_always, httpResponseReader, &data);
+    
+    int neon_stat = ne_request_dispatch(request.get());
+
+    if (neon_stat != NE_OK) {
+        return -neon_stat;
+    }
+    
+    memcpy(ctx->buf, data.data(), data.size());
+    
+    return data.size();
+}
 
 
 

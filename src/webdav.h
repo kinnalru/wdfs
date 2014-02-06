@@ -17,6 +17,9 @@ void create_request_handler(ne_request *req, void *userdata, const char *method,
 int post_send_handler(ne_request *req, void *userdata, const ne_status *status);
 int get_head(ne_session *session, const std::string& path, webdav_resource_t* resource);
 
+size_t get(ne_session *session, const std::string& path, fuse_context_t* ctx);
+size_t put(ne_session *session, const std::string& path, fuse_context_t* ctx);
+
 //Helper to hook libneon functions - ne_put, ne_get, etc...
 struct hook_helper_t {
     ne_session* session;
