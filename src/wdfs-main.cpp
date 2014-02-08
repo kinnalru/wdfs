@@ -81,6 +81,7 @@ struct wdfs_conf wdfs = [] () {
     w.redirect = true;
     w.locking_mode = NO_LOCK;
     w.locking_timeout = 300;
+    w.cachedir1 = 0;
     return w;
 } ();
 
@@ -201,6 +202,7 @@ struct readdir_ctx_t {
     void *buf;
     fuse_fill_dir_t filler;
     std::shared_ptr<char> remotepath;
+    std::vector<std::string> oldfiles;
 };
 
 /* infos about an open file. used by open(), read(), write() and release()   */
@@ -494,6 +496,11 @@ static void wdfs_readdir_propfind_callback(
         }
     }
 
+    ctx->oldfiles.erase(
+        std::remove(ctx->oldfiles.begin(), ctx->oldfiles.end(), cache->normalize(remotepath)),
+        ctx->oldfiles.end()
+    );
+    
     cache->update(remotepath, *cached_file);
 
     /* add directory entry */
@@ -520,9 +527,10 @@ static int wdfs_readdir(
         filler,
         get_remotepath(localpath)
     };
+    
+    ctx.oldfiles = cache->infolder(ctx.remotepath.get());
 
     if (!ctx.remotepath) return -ENOMEM;
-
 
     int ret = ne_simple_propfind(
         session, ctx.remotepath.get(), NE_DEPTH_ONE,
@@ -541,6 +549,10 @@ static int wdfs_readdir(
         return -ENOENT;
     }
 
+    std::for_each(ctx.oldfiles.begin(), ctx.oldfiles.end(), [] (const std::string& s) {
+        cache->remove(s);
+    });
+    
     struct stat st;
     memset(&st, 0, sizeof(st));
     st.st_mode = S_IFDIR | 0777;
@@ -1222,8 +1234,16 @@ int main(int argc, char *argv[])
     if (fuse_opt_parse(&options, &wdfs, wdfs_opts, wdfs_opt_proc) == -1)
         exit(1);
 
-    wdfs.cachedir = wdfs.cachedir1;
-    wdfs.cachedir += "/";
+    if (wdfs.cachedir1) {
+      wdfs.cachedir = wdfs.cachedir1;
+      wdfs.cachedir += "/";
+      mkdir_p(wdfs.cachedir);
+      char *real_path = realpath(wdfs.cachedir.c_str(), NULL);
+      wdfs.cachedir = real_path;
+      wdfs.cachedir += "/";
+      // use real_path
+      free(real_path);
+    }
 
     if (wdfs.webdav_resource.empty()) {
         fprintf(stderr, "%s: missing webdav uri\n", wdfs.program_name);

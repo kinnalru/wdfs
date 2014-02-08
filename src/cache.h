@@ -91,6 +91,26 @@ public:
     item_p restore(const std::string& path_raw) {
         auto cached_file = get(path_raw);
         cached_file->fd = ::open(cache_filename(path_raw).c_str(), O_RDWR);
+        
+        if (cached_file->fd != -1)
+        {
+            struct stat stat;
+            fstat(cached_file->fd, &stat);
+            if (stat.st_size != cached_file->resource.stat.st_size)
+            {
+                ::close(cached_file->fd);
+                ::unlink(cache_filename(path_raw).c_str());
+                cached_file->fd = -1;
+            }
+            
+            if (stat.st_mtime != cached_file->resource.stat.st_mtime)
+            {
+                ::close(cached_file->fd);
+                ::unlink(cache_filename(path_raw).c_str());
+                cached_file->fd = -1;
+            }
+        }
+        
         update(path_raw, *cached_file);
         return cached_file;
     }
@@ -127,6 +147,30 @@ public:
         const std::string path = normalize(path_raw);
         std::cerr << "cache +updated+ for path:" << path << std::endl;
         cache_[path] = v;
+    }
+    
+    std::vector<std::string> infolder(const std::string& path_raw) {
+        std::string path = normalize(path_raw);
+        
+        std::string folder_suffix = (get(path_raw)->resource.stat.st_mode || S_IFDIR) ? "/" : "";
+        path += folder_suffix;
+        
+        const char *filename = strrchr(path.c_str(), '/');
+        filename++;
+        const std::string folder(path.c_str(), filename);
+        std::vector<std::string> files;
+        std::for_each(cache_.begin(), cache_.end(),
+          [&] (const data_t::value_type& p) {
+            if (p.first.empty()) return;
+            const char *f = strrchr(p.first.c_str(), '/');
+            f++;
+            const std::string f2(p.first.c_str(), f);
+            if (f2 == folder) {
+                files.push_back(p.first);
+            }
+          }
+        );
+        return files;
     }
     
     virtual void remove(const std::string& path_raw) {
