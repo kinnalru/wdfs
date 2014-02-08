@@ -67,7 +67,6 @@ class webdav_resource_t {
     template<class Archive>
     void serialize(Archive & ar, const unsigned int version)
     {
-        ar & etag;
         std::string statstr = to_string(stat);
         ar & statstr;
         if (auto startptr = from_string<struct stat>(statstr)) {
@@ -85,12 +84,10 @@ public:
     wrap_stat_field(size, off_t, stat);
     
     void update_from(const webdav_resource_t& other) {
-        etag = other.etag;
         update_mtime(other.mtime());
         update_size(other.size());
     }
     
-    etag_t etag;
     struct stat stat;
 };
 

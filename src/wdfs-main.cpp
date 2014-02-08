@@ -68,7 +68,7 @@ static int call_fuse_main(struct fuse_args *args);
 #endif
 
 /* product string according RFC 2616, that is included in every request.     */
-const char *project_name = PACKAGE_NAME"/"PACKAGE_VERSION;
+const char *project_name = PACKAGE_NAME "/" PACKAGE_VERSION;
 
 /* homepage of this filesystem                                               */
 const char *project_uri = "http://noedler.de/projekte/wdfs/";
@@ -114,6 +114,7 @@ static struct fuse_opt wdfs_opts[] = {
     WDFS_OPT("username=%s",			username, 0),
     WDFS_OPT("-p %s",				password, 0),
     WDFS_OPT("password=%s",			password, 0),
+    WDFS_OPT("cachedir=%s",     cachedir1, 0),    
     WDFS_OPT("no_redirect",			redirect, false),
     WDFS_OPT("-l",					locking_mode, SIMPLE_LOCK),
     WDFS_OPT("locking",				locking_mode, SIMPLE_LOCK),
@@ -194,7 +195,7 @@ static int wdfs_opt_proc(
 /* webdav server base directory. if you are connected to "http://server/dir/"
  * remotepath_basedir is set to "/dir" (starting slash, no ending slash).
  * if connected to the root directory (http://server/) it will be set to "". */
-char *remotepath_basedir;
+char *remotepath_basedir = 0;
 
 struct readdir_ctx_t {
     void *buf;
@@ -279,11 +280,11 @@ const char* get_helper(const ne_prop_result_set *results, field_e field) {
 }
 
 /* evaluates the propfind result set and sets the file's attributes (stat) */
-static void set_stat(etag_t& etag, struct stat& stat, const ne_prop_result_set *results)
+static void set_stat(struct stat& stat, const ne_prop_result_set *results)
 {
     wdfs_dbg("%s()\n", __func__);
 
-    const char *resourcetype, *contentlength, *lastmodified, *creationdate/*, *executable*/, *modestr, *etagstr;
+    const char *resourcetype, *contentlength, *lastmodified, *creationdate/*, *executable*/, *modestr/*, *etagstr*/;
 
     assert(results);
 
@@ -294,7 +295,7 @@ static void set_stat(etag_t& etag, struct stat& stat, const ne_prop_result_set *
     creationdate	= get_helper(results, CREATION);
     // 	executable	    = get_helper(results, EXECUTE);
     modestr	        = get_helper(results, PERMISSIONS);
-    etagstr         = get_helper(results, ETAG);
+//     etagstr         = get_helper(results, ETAG);
 
     int mode = 0;
 
@@ -333,8 +334,6 @@ static void set_stat(etag_t& etag, struct stat& stat, const ne_prop_result_set *
     stat.st_mode &= ~umask(0);
     stat.st_uid = getuid();
     stat.st_gid = getgid();
-
-    if (etagstr) etag.reset(etagstr);
 }
 
 
@@ -392,9 +391,9 @@ static void wdfs_getattr_propfind_callback(
     assert(remotepath);
 
     cache_t::item_p cached_file(new cache_t::item);
-    set_stat(cached_file->resource.etag, cached_file->resource.stat, results);
+    set_stat(cached_file->resource.stat, results);
     if (cache_t::item_p old_file = cache->get(remotepath)) {
-        if (cached_file->resource.etag == old_file->resource.etag) {
+        if (!cached_file->modofied(*old_file)) {
             cached_file->fd = old_file->fd;
         }
     }
@@ -488,9 +487,9 @@ static void wdfs_readdir_propfind_callback(
         * performs better then single requests for each file in getattr().  */
 
     cache_t::item_p cached_file(new cache_t::item);
-    set_stat(cached_file->resource.etag, cached_file->resource.stat, results);
+    set_stat(cached_file->resource.stat, results);
     if (cache_t::item_p old_file = cache->get(remotepath)) {
-        if (cached_file->resource.etag == old_file->resource.etag) {
+        if (!cached_file->modofied(*old_file)) {
             cached_file->fd = old_file->fd;
         }
     }
@@ -574,13 +573,8 @@ static int wdfs_open(const char *localpath, struct fuse_file_info *fi)
     if (auto cached_file = cache->get(remotepath.get())) {
         resource_full = cached_file->resource;
         
-        if (resource_new.etag != cached_file->resource.etag) {
-            wdfs_pr("   -- ETag is diferent - invalidate cache\n");
-            cache->remove(remotepath.get());
-            cached_file.reset();
-        }
-        else if (!resource_new.etag && resource_new.stat.st_mtime != cached_file->resource.stat.st_mtime) {
-            wdfs_pr("   -- There no ETag supported and modtiem different - invalidate cache\n");
+        if (resource_new.stat.st_mtime != cached_file->resource.stat.st_mtime) {
+            wdfs_pr("   -- modtiem different - invalidate cache\n");
             cache->remove(remotepath.get());
             cached_file.reset();
         }
@@ -635,7 +629,6 @@ static int wdfs_open(const char *localpath, struct fuse_file_info *fi)
         }
 
         webdav_context_t ctx{session};  
-        ctx.resource.etag.reset(""); //disable etag facility
         hook_helper_t hooker(session, &ctx);
         
         /* GET the data to the filehandle even if the file is opened O_WRONLY,
@@ -648,9 +641,9 @@ static int wdfs_open(const char *localpath, struct fuse_file_info *fi)
 
         resource_full.update_from(resource_new);
         resource_full.update_from(ctx.resource);
-        cached_file_t cached_file(resource_full, file->fd);
+        cached_file_t cached_file1(resource_full, file->fd);
         wdfs_pr("   ++ File downloaded successfuly\n");
-        cache->update(remotepath.get(), cached_file);
+        cache->update(remotepath.get(), cached_file1);
     }
 
 
@@ -675,7 +668,7 @@ static int wdfs_read(
     std::cerr << "read from fd:" << file->fd << std::endl;
     
     int ret = pread(file->fd, buf, size, offset);
-    if (ret < 0) wdfs_err("pread() error: %d\n", strerror(errno));
+    if (ret < 0) wdfs_err("pread() error: %s\n", strerror(errno));
 
     return ret;
 }
@@ -1093,10 +1086,10 @@ static int wdfs_statfs(const char *localpath, struct statvfs *buf)
 {
     wdfs_dbg("%s()\n", __func__);
 
-    cache.reset(new cache_t(wdfs.cache_folder));
+    cache.reset(new cache_t(wdfs.cachedir, wdfs.webdav_remotebasedir));
 
     try {
-        std::ifstream stream((wdfs.cache_folder + "cache").c_str());
+        std::ifstream stream((wdfs.cachedir + "cache").c_str());
         boost::archive::text_iarchive oa(stream);
         oa >> *cache;
     }
@@ -1117,9 +1110,10 @@ static void wdfs_destroy(void*)
     wdfs_dbg("%s()\n", __func__);
 
     try {
-        std::ofstream stream((wdfs.cache_folder + "cache").c_str());
+        std::ofstream stream((wdfs.cachedir + "cache").c_str());
         boost::archive::text_oarchive oa(stream);
         oa << *cache;
+        cache.reset();
     }
     catch(const std::exception& e) {
         wdfs_dbg("%s(): can't save cache\n", __func__);
@@ -1175,6 +1169,7 @@ static void print_help()
 "    -o accept_sslcert      accept ssl certificate, don't prompt the user\n"
 "    -o username=arg        replace arg with username of the webdav resource\n"
 "    -o password=arg        replace arg with password of the webdav resource\n"
+"    -o cachedir=arg        cachedir\n"
 "                           username/password can also be entered interactively\n"
 "    -o no_redirect         disable http redirect support\n"
 "    -o svn_mode            enable subversion mode to access all revisions\n"
@@ -1227,6 +1222,8 @@ int main(int argc, char *argv[])
     if (fuse_opt_parse(&options, &wdfs, wdfs_opts, wdfs_opt_proc) == -1)
         exit(1);
 
+    wdfs.cachedir = wdfs.cachedir1;
+    wdfs.cachedir += "/";
 
     if (wdfs.webdav_resource.empty()) {
         fprintf(stderr, "%s: missing webdav uri\n", wdfs.program_name);
@@ -1242,9 +1239,9 @@ int main(int argc, char *argv[])
     
     if(char const* home = getenv("HOME")) {
         auto hasher = std::hash<std::string>();
-        wdfs.cache_folder = std::string(home) + "/" + ".wdfs/" + std::to_string(hasher(wdfs.webdav_resource)) + "/";
-        if (mkdir_p(wdfs.cache_folder)) {
-            fprintf(stderr, "%s: can't create cache folder %s\n", wdfs.program_name, wdfs.cache_folder.c_str());
+        if (wdfs.cachedir.empty()) wdfs.cachedir = std::string(home) + "/" + ".wdfs/" + std::to_string(hasher(uri->host)) + "/";
+        if (mkdir_p(wdfs.cachedir)) {
+            fprintf(stderr, "%s: can't create cache folder %s\n", wdfs.program_name, wdfs.cachedir.c_str());
             exit(1);
         }
         
@@ -1276,7 +1273,7 @@ int main(int argc, char *argv[])
             !wdfs.password.empty() ? "****" : "NULL",
             wdfs.redirect == true ? "true" : "false",
             wdfs.locking_mode, wdfs.locking_timeout,
-            wdfs.cache_folder.c_str(), wdfs.mountpoint.c_str());
+            wdfs.cachedir.c_str(), wdfs.mountpoint.c_str());
     }
 
     /* set a nice name for /proc/mounts */
@@ -1300,6 +1297,10 @@ int main(int argc, char *argv[])
     if (setup_webdav_session(*uri, wdfs.username, wdfs.password)) {
         status_program_exec = 1;
         goto cleanup;
+    }
+	 
+    if (remotepath_basedir) {
+        wdfs.webdav_remotebasedir = remotepath_basedir;
     }
 
     /* finally call fuse */

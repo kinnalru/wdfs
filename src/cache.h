@@ -23,6 +23,10 @@ public:
     cached_file_t() : fd (-1) {};
     cached_file_t(const webdav_resource_t& r, int f) : resource(r), fd(f) {};
   
+    bool modofied(const cached_file_t& old) const {
+        return resource.mtime() != old.resource.mtime() || resource.size() != old.resource.size();
+    }
+    
     webdav_resource_t resource;
     int fd;
 };
@@ -42,7 +46,8 @@ public:
     typedef cached_file_t item;
     typedef std::unique_ptr<item> item_p;
 
-    cache_t(const std::string& folder) : folder_(folder) {}
+    cache_t(const std::string& folder, const std::string& prefix) : folder_(folder), prefix_(prefix) {
+    }
     
     std::string normalize(const std::string& path_raw) const {
         std::shared_ptr<char> path(unify_path(path_raw.c_str(), UNESCAPE), free);
@@ -51,10 +56,12 @@ public:
 
     std::string cache_filename(const std::string& path_raw) const {
         const std::string path = normalize(path_raw);
-        if (path.find(folder_) != std::string::npos)
+        if (path.find(folder_) != std::string::npos) {
             return path;
-        else
-            return folder_+ "/files/" + path;        
+        }
+        else {
+            return folder_+ "/files/" + prefix_ + "/" + path;        
+        }
     }
     
     inline int size() const {return cache_.size();}
@@ -131,6 +138,7 @@ public:
     
 private:
     std::string folder_;
+    std::string prefix_;
     data_t cache_;
 };
 
