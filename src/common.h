@@ -5,6 +5,7 @@
 #include <sys/stat.h>
 #include <memory>
 #include <string>
+#include <stdexcept>
 
 #include <boost/optional.hpp>
 #include <boost/serialization/map.hpp>
@@ -14,6 +15,23 @@
 
 typedef struct ne_session_s ne_session;
 typedef boost::optional<std::string> etag_t;
+
+typedef std::map<std::string, struct stat> stats_t;
+
+struct webdav_exception_t : public std::runtime_error
+{
+    webdav_exception_t(const std::string& msg, int code)
+        : std::runtime_error(msg)
+        , code_(code)
+    {}
+    
+    int code() const {
+        return code_;
+    }
+    
+private:
+    int code_;
+};
 
 /* used as mode for unify_path() */
 enum {

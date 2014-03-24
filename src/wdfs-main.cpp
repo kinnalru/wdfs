@@ -39,6 +39,8 @@
 #include <iostream>
 #include <fstream>
 
+#include <boost/foreach.hpp>
+
 #include "wdfs-main.h"
 #include "webdav.h"
 #include "cache.h"
@@ -213,35 +215,6 @@ struct file_t {
     bool modified;	/* set true if the filehandle's content is modified  */
 };
 
-enum field_e {
-    TYPE = 0,
-    LENGTH,
-    MODIFIED,    
-    CREATION,    
-    ETAG,
-    EXECUTE,
-    PERMISSIONS,
-    END
-};
-
-static const auto prop_names = [] {
-    std::vector<ne_propname> v(END + 1);
-    v[ETAG]     = {"DAV:", "getetag"};
-    v[LENGTH]   = {"DAV:", "getcontentlength"};
-    v[CREATION] = {"DAV:", "creationdate"};
-    v[MODIFIED] = {"DAV:", "getlastmodified"};
-    v[TYPE]     = {"DAV:", "resourcetype"};
-    v[EXECUTE]  = {"http://apache.org/dav/props/", "executable"};
-    v[PERMISSIONS]  = {"X-DAV:", "permissions"};
-    v[END]      = {NULL, NULL}; 
-    return v;
-} ();
-
-static const auto anonymous_prop_names = [] {
-    std::vector<ne_propname> v = prop_names;
-    for(auto it = v.begin(); it != v.end(); ++ it) it->nspace = NULL;
-    return v;
-} ();
 
 /* returns the malloc()ed escaped remotepath on success or NULL on error */
 static std::shared_ptr<char> get_remotepath(const char *localpath)
@@ -274,140 +247,8 @@ std::string get_filename(const char* remotepath) {
     return filename;
 }
 
-const char* get_helper(const ne_prop_result_set *results, field_e field) {
-    const char* data = ne_propset_value(results, &prop_names[field]);
-    return (data) 
-        ? data
-        : ne_propset_value(results, &anonymous_prop_names[field]);
-}
-
-/* evaluates the propfind result set and sets the file's attributes (stat) */
-static void set_stat(struct stat& stat, const ne_prop_result_set *results)
-{
-    wdfs_dbg("%s()\n", __func__);
-
-    const char *resourcetype, *contentlength, *lastmodified, *creationdate/*, *executable*/, *modestr/*, *etagstr*/;
-
-    assert(results);
-
-    /* get the values from the propfind result set */
-    resourcetype	= get_helper(results, TYPE);
-    contentlength	= get_helper(results, LENGTH);
-    lastmodified	= get_helper(results, MODIFIED);
-    creationdate	= get_helper(results, CREATION);
-    // 	executable	    = get_helper(results, EXECUTE);
-    modestr	        = get_helper(results, PERMISSIONS);
-//     etagstr         = get_helper(results, ETAG);
-
-    int mode = 0;
-
-    /* webdav collection == directory entry */
-    if (resourcetype != NULL && !strstr("<collection", resourcetype)) {
-        /* "DT_DIR << 12" equals "S_IFDIR" */
-        mode = (modestr) ? atoi(modestr) : 0777;
-        mode |= S_IFDIR;
-        stat.st_size = 4096;
-    } else {
-        mode = (modestr) ? atoi(modestr) : 0666;
-        mode |= S_IFREG;
-        stat.st_size = (contentlength) ? atoll(contentlength) : 0;
-    }
-
-    stat.st_mode = mode;
-
-    stat.st_nlink = 1;
-    stat.st_atime = time(NULL);
-
-    if (lastmodified != NULL)
-        stat.st_mtime = ne_rfc1123_parse(lastmodified);
-    else
-        stat.st_mtime = 0;
-
-    if (creationdate != NULL)
-        stat.st_ctime = ne_iso8601_parse(creationdate);
-    else
-        stat.st_ctime = 0;
-
-    /* calculate number of 512 byte blocks */
-    stat.st_blocks	= (stat.st_size + 511) / 512;
-
-    /* no need to set a restrict mode, because fuse filesystems can
-        * only be accessed by the user that mounted the filesystem.  */
-    stat.st_mode &= ~umask(0);
-    stat.st_uid = getuid();
-    stat.st_gid = getgid();
-}
-
-
-/* this method is invoked, if a redirect needs to be done. therefore the current
- * remotepath is freed and set to the redirect target. returns -1 and prints an
- * error if the current host and new host differ. returns 0 on success and -1 
- * on error. side effect: remotepath is freed on error. */
-// static int handle_redirect(char **remotepath)
-static int handle_redirect(std::shared_ptr<char>& remotepath)
-{
-    wdfs_dbg("%s(%s)\n", __func__, remotepath.get());
-
-    /* get the current_uri and new_uri structs */
-    ne_uri current_uri;
-    ne_fill_server_uri(session, &current_uri);
-    const ne_uri *new_uri = ne_redirect_location(session);
-
-    if (strcasecmp(current_uri.host, new_uri->host)) {
-        fprintf(stderr,
-            "## error: wdfs does not support redirecting to another host!\n");
-        free_chars(&current_uri.host, &current_uri.scheme, NULL);
-        return -1;
-    }
-
-    /* can't use ne_uri_free() here, because only host and scheme are mallocd */
-    free_chars(&current_uri.host, &current_uri.scheme, NULL);
-
-    /* set the new remotepath to the redirect target path */
-    remotepath.reset(ne_strdup(new_uri->path));
-    return 0;
-}
-
 
 /* +++ fuse callback methods +++ */
-
-
-/* this method is called by ne_simple_propfind() from wdfs_getattr() for a
- * specific file. it sets the file's attributes and and them to the cache. */
-static void wdfs_getattr_propfind_callback(
-#if NEON_VERSION >= 26
-    void *userdata, const ne_uri* href_uri, const ne_prop_result_set *results)
-#else
-    void *userdata, const char *remotepath, const ne_prop_result_set *results)
-#endif
-{
-#if NEON_VERSION >= 26
-    char *remotepath = ne_uri_unparse(href_uri);
-#endif
-
-    wdfs_dbg("%s(%s)\n", __func__, remotepath);  
-
-    struct stat *stat = reinterpret_cast<struct stat*>(userdata);
-    memset(stat, 0, sizeof(struct stat));
-
-    assert(remotepath);
-
-    cache_t::item_p cached_file(new cache_t::item);
-    set_stat(cached_file->resource.stat, results);
-    if (cache_t::item_p old_file = cache->get(remotepath)) {
-        if (!cached_file->modofied(*old_file)) {
-            cached_file->fd = old_file->fd;
-        }
-    }
-
-    cache->update(remotepath, *cached_file);
-
-    *stat = cached_file->resource.stat;
-
-#if NEON_VERSION >= 26
-    FREE(remotepath);
-#endif
-}
 
 
 /* this method returns the file attributes (stat) for a requested file either
@@ -420,29 +261,32 @@ static int wdfs_getattr(const char *localpath, struct stat *stat)
 
     auto remotepath(get_remotepath(localpath));
     if (!remotepath) return -ENOMEM;
-
+    
     if (auto cached_stat = cache->stat(remotepath.get())) {
         *stat = *cached_stat;
     } 
     else {
-        int ret = ne_simple_propfind(
-            session, remotepath.get(), NE_DEPTH_ZERO, &prop_names[0],
-            wdfs_getattr_propfind_callback, stat);
-        /* handle the redirect and retry the propfind with the new target */
-        if (ret == NE_REDIRECT && wdfs.redirect == true) {
-            if (handle_redirect(remotepath))
-                return -ENOENT;
-            ret = ne_simple_propfind(
-                session, remotepath.get(), NE_DEPTH_ZERO, &prop_names[0],
-                wdfs_getattr_propfind_callback, stat);
+        try {
+            stats_t stats = webdav_getattrs(session, remotepath);
+            BOOST_FOREACH(auto p, stats) {
+                cache_t::item_p cached_file(new cache_t::item);
+                cached_file->resource.stat = p.second;
+                if (cache_t::item_p old_file = cache->get(p.first)) {
+                    if (!cached_file->modofied(*old_file)) {
+                        cached_file->fd = old_file->fd;
+                    }
+                }  
+                cache->update(p.first, *cached_file);
+            }
+            
+            *stat = *cache->stat(remotepath.get());            
         }
-        if (ret != NE_OK) {
-            fprintf(stderr, "## PROPFIND error in %s(): %s\n",
-                __func__, ne_get_error(session));
-            return -ENOENT;
+        catch (const webdav_exception_t& e) {
+            fprintf(stderr, "## Error in %s(): %s\n", __func__, e.what());
+            return e.code();
         }
     }
-
+    
     return 0;
 }
 

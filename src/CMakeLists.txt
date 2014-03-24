@@ -39,5 +39,5 @@ set(SOURCES
 )
 
 add_executable(${TARGET} ${HEADERS} ${SOURCES})
-target_link_libraries(${TARGET} ${Boost_LIBRARIES} neon fuse glib-2.0)
+target_link_libraries(${TARGET} ${Boost_LIBRARIES} pthread neon fuse glib-2.0)
 
