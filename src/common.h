@@ -78,6 +78,9 @@ std::unique_ptr<T> from_string(const std::string& strdata) {
     bool has_##field() const {return object.st_##field != 0;}; \
     void update_##field(type f) {if (f) object.st_##field = f;};
     
+inline bool differ(const struct stat& s1, const struct stat s2) {
+    return s1.st_mtime != s2.st_mtime || s1.st_size != s2.st_size;
+}
     
 class webdav_resource_t {
     friend class boost::serialization::access;
@@ -97,9 +100,18 @@ public:
         memset(&stat, 0, sizeof(struct stat));
     };
     
+    webdav_resource_t(const struct stat& st) {
+        stat = st;
+    }
+    
     
     wrap_stat_field(mtime, time_t, stat);
     wrap_stat_field(size, off_t, stat);
+    wrap_stat_field(mode, mode_t, stat);
+    
+    bool differ(const webdav_resource_t& other) const {
+        return ::differ(stat, other.stat);
+    }
     
     void update_from(const webdav_resource_t& other) {
         update_mtime(other.mtime());

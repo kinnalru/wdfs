@@ -267,19 +267,18 @@ static int wdfs_getattr(const char *localpath, struct stat *stat)
     } 
     else {
         try {
-            stats_t stats = webdav_getattrs(session, remotepath);
+            const stats_t stats = webdav_getattrs(session, remotepath);
             BOOST_FOREACH(auto p, stats) {
-                cache_t::item_p cached_file(new cache_t::item);
-                cached_file->resource.stat = p.second;
+                cache_t::item_p new_file(new cache_t::item(p.second));
                 if (cache_t::item_p old_file = cache->get(p.first)) {
-                    if (!cached_file->modofied(*old_file)) {
-                        cached_file->fd = old_file->fd;
+                    if (!new_file->differ(*old_file)) {
+                        new_file->set_fd(old_file->fd());
                     }
                 }  
-                cache->update(p.first, *cached_file);
+                cache->update(p.first, *new_file);                
             }
             
-            *stat = *cache->stat(remotepath.get());            
+            *stat = *cache->stat(remotepath.get());
         }
         catch (const webdav_exception_t& e) {
             fprintf(stderr, "## Error in %s(): %s\n", __func__, e.what());
@@ -332,11 +331,12 @@ static void wdfs_readdir_propfind_callback(
         * the file attributes of all files of this collection (directory). this 
         * performs better then single requests for each file in getattr().  */
 
-    cache_t::item_p cached_file(new cache_t::item);
-    set_stat(cached_file->resource.stat, results);
+    struct stat st;
+    set_stat(st, results);
+    cache_t::item_p cached_file(new cache_t::item(st));
     if (cache_t::item_p old_file = cache->get(remotepath)) {
-        if (!cached_file->modofied(*old_file)) {
-            cached_file->fd = old_file->fd;
+        if (!cached_file->differ(*old_file)) {
+            cached_file->set_fd(old_file->fd());
         }
     }
 
@@ -348,7 +348,8 @@ static void wdfs_readdir_propfind_callback(
     cache->update(remotepath, *cached_file);
 
     /* add directory entry */
-    if (ctx->filler(ctx->buf, filename.c_str(), &cached_file->resource.stat, 0))
+    st = cached_file->stat();
+    if (ctx->filler(ctx->buf, filename.c_str(), &st, 0))
         fprintf(stderr, "## filler() error in %s()!\n", __func__);
 
     free_chars(&remotepath, &remotepath1, &remotepath2, NULL);
@@ -427,42 +428,38 @@ static int wdfs_open(const char *localpath, struct fuse_file_info *fi)
     if (get_head(session, remotepath.get(), &resource_new)) return -ENOENT;
 
     if (auto cached_file = cache->get(remotepath.get())) {
-        resource_full = cached_file->resource;
+        resource_full = cached_file->resource();
         
-        if (resource_new.stat.st_mtime != cached_file->resource.stat.st_mtime) {
-            wdfs_pr("   -- modtiem different - invalidate cache\n");
+        if (resource_new.differ(cached_file->resource())) {
+            wdfs_pr("   -- new resource different - invalidate cache\n");
             cache->remove(remotepath.get());
             cached_file.reset();
         }
-        else if (resource_new.stat.st_size != cached_file->resource.stat.st_size) {
-            wdfs_pr("   -- Filesize different - invalidate cache\n");
-            cache->remove(remotepath.get());
-            cached_file.reset();
-        }
-        else if (cached_file->fd == -1) {
+        else if (cached_file->fd() == -1) {
             wdfs_pr("   -- There is no file in cache - try to restore cache from disk...\n");
             cached_file = cache->restore(remotepath.get());
-            if (cached_file->fd == -1) {
+            if (cached_file->fd() == -1) {
                 wdfs_pr("   -- Filecache +miss+ NOT RESTORED\n");             
                 cache->remove(remotepath.get());
                 cached_file.reset();
             }
             else {
-                wdfs_pr("   -- Filecache +hit+ RESTORED %d\n", cached_file->fd);             
+                wdfs_pr("   -- Filecache +hit+ RESTORED %d\n", cached_file->fd());             
             }
         }
         
         
-        if (cached_file && resource_new.stat.st_mtime != cached_file->resource.stat.st_mtime) {
+        if (cached_file && resource_new.stat.st_mtime != cached_file->stat().st_mtime) {
             wdfs_pr("   ++ ETag and sizes are same but modtime different - update cache\n");
-            cached_file->resource.update_from(resource_new);
+            
+            //cached_file->resource.update_from(resource_new); //TODO FIXME LAST
             cache->update(remotepath.get(), *cached_file);
         }
     }
 
     if (auto cached_file = cache->get(remotepath.get())) {
         wdfs_pr("   ++ Filecache +hit+ no download needed\n");
-        file->fd = cached_file->fd;
+        file->fd = cached_file->fd();
     }
     else {
         wdfs_pr("   ++ Filecache +miss+ download file\n");
@@ -580,7 +577,7 @@ static int wdfs_release(const char *localpath, struct fuse_file_info *fi)
                 return -EIO;
             }
             
-            cached_file->resource.update_from(ctx.resource);
+            //cached_file->resource.update_from(ctx.resource); //TODO FIXME LAST
             cache->update(remotepath.get(), *cached_file);
         }
         
@@ -639,16 +636,16 @@ static int wdfs_truncate(const char *localpath, off_t size)
     if (!remotepath) return -ENOMEM;
 
     if (auto cached_file = cache->get(remotepath.get())) {
-        int fd = cached_file->fd;
+        int fd = cached_file->fd();
         if (fd != -1) {
             if (int ret = ftruncate(fd, size)) {
                 fprintf(stderr, "## ftruncate() error: %d\n", ret);
                 return -EIO;                
             }
             else {
-                cached_file->resource.stat.st_size = size;
+                //cached_file->resource.stat.st_size = size; //TODO FIXME
                 /* calculate number of 512 byte blocks */
-                cached_file->resource.stat.st_blocks = (cached_file->resource.stat.st_size + 511) / 512;
+                //cached_file->resource.stat.st_blocks = (cached_file->resource.stat.st_size + 511) / 512;//TODO FIXME
                 cache->update(remotepath.get(), *cached_file);
             }
             return 0;
@@ -732,9 +729,9 @@ static int wdfs_ftruncate(
     /* update the cache item of the ftruncate()d file */
     cache_t::item_p cached_file = cache->get(remotepath.get());
     assert(cached_file);
-    cached_file->resource.stat.st_size = size;
+    //cached_file->resource.stat.st_size = size;//TODO FIXME
     /* calculate number of 512 byte blocks */
-    cached_file->resource.stat.st_blocks	= (cached_file->resource.stat.st_size + 511) / 512;
+    //cached_file->resource.stat.st_blocks	= (cached_file->resource.stat.st_size + 511) / 512;//TODO FIXME
     cache->update(remotepath.get(), *cached_file);
 
     return 0;
@@ -889,7 +886,7 @@ int wdfs_chmod(const char *localpath, mode_t mode)
     cache_t::item_p cached_file = cache->get(remotepath.get());
     assert(cached_file);
     
-    webdav_context_t ctx{session, cached_file->resource};  
+    webdav_context_t ctx{session, cached_file->resource()};  
     hook_helper_t hooker(session, &ctx);
     
     if (ne_proppatch(session, remotepath.get(), ops)) {
@@ -897,7 +894,7 @@ int wdfs_chmod(const char *localpath, mode_t mode)
         return -ENOENT;
     }
     
-    cached_file->resource = ctx.resource;
+    //cached_file->resource = ctx.resource;//TODO FIXME
     cache->update(remotepath.get(), *cached_file);
     
     return 0;

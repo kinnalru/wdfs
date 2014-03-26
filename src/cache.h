@@ -4,6 +4,7 @@
 #include <string>
 #include <map>
 #include <memory>
+#include <boost/concept_check.hpp>
 
 #include "common.h"
 
@@ -15,20 +16,49 @@ class cached_file_t {
     template<class Archive>
     void serialize(Archive & ar, const unsigned int version)
     {
-        ar & resource;
-//         ar & fd;
+        ar & resource_;
     }
     
 public:
-    cached_file_t() : fd (-1) {};
-    cached_file_t(const webdav_resource_t& r, int f) : resource(r), fd(f) {};
+    cached_file_t(int f = -1) : fd_ (f) {};
+    cached_file_t(const struct stat& s) : resource_(s), fd_(-1) {};
+    cached_file_t(const webdav_resource_t& r, int f) : resource_(r), fd_(f) {};
   
-    bool modofied(const cached_file_t& old) const {
-        return resource.mtime() != old.resource.mtime() || resource.size() != old.resource.size();
+    bool differ(const cached_file_t& other) const {
+        return resource_.differ(other.resource_);
     }
     
-    webdav_resource_t resource;
-    int fd;
+    bool differ(const struct stat& other) const {
+        return ::differ(stat(), other);
+    }
+    
+    struct stat stat() const {
+        if (fd_ != -1) {
+            struct stat st;
+            if (::fstat(fd_, &st)) {
+                throw std::runtime_error("achtunng fstat");
+            }
+            return st;
+        }
+        else {
+            return resource_.stat;
+        }
+    }
+    
+    int fd() const {
+        return fd_;
+    }
+    
+    void set_fd(int fd) {
+        fd_ = fd;
+    }
+    const webdav_resource_t& resource() const {
+        return resource_;
+    }
+    
+private:
+    webdav_resource_t resource_;
+    int fd_;
 };
 
 class cache_t {
@@ -46,8 +76,9 @@ public:
     typedef cached_file_t item;
     typedef std::unique_ptr<item> item_p;
 
-    cache_t(const std::string& folder, const std::string& prefix) : folder_(folder), prefix_(prefix) {
-    }
+    cache_t(const std::string& folder, const std::string& prefix)
+        : folder_(folder), prefix_(prefix)
+    {}
     
     std::string normalize(const std::string& path_raw) const {
         std::shared_ptr<char> path(unify_path(path_raw.c_str(), UNESCAPE), free);
@@ -68,7 +99,7 @@ public:
     
     stat_p stat(const std::string& path_raw) const {
         if (auto item = get(path_raw)) {
-            return stat_p(new struct stat(item->resource.stat));
+            return stat_p(new struct stat(item->stat()));
         }
         else {
             return stat_p();
@@ -79,39 +110,30 @@ public:
         const std::string path = normalize(path_raw);
         data_t::const_iterator it = cache_.find(path);
         if (it != cache_.end()) {
-            std::cerr << "cache +hit+ for path:" << path << std::endl;
             return item_p(new item(it->second));
         }
         else {
-            std::cerr << "cache _miss_ for path:" << path << std::endl;
             return item_p();
         }
     }
     
     item_p restore(const std::string& path_raw) {
         auto cached_file = get(path_raw);
-        cached_file->fd = ::open(cache_filename(path_raw).c_str(), O_RDWR);
+        assert(cached_file->fd() == -1);
+        item_p new_file(new item(::open(cache_filename(path_raw).c_str(), O_RDWR)));
         
-        if (cached_file->fd != -1)
+        if (new_file->fd() != -1)
         {
-            struct stat stat;
-            fstat(cached_file->fd, &stat);
-            if (stat.st_size != cached_file->resource.stat.st_size)
-            {
-                ::close(cached_file->fd);
+            if (new_file->differ(cached_file->stat())) {
+                ::close(new_file->fd());
                 ::unlink(cache_filename(path_raw).c_str());
-                cached_file->fd = -1;
             }
-            
-            if (stat.st_mtime != cached_file->resource.stat.st_mtime)
-            {
-                ::close(cached_file->fd);
-                ::unlink(cache_filename(path_raw).c_str());
-                cached_file->fd = -1;
+            else {
+                update(path_raw, *new_file);
+                return new_file;
             }
         }
         
-        update(path_raw, *cached_file);
         return cached_file;
     }
     
@@ -132,27 +154,23 @@ public:
         wdfs_dbg("%s(%s) cached file %s created\n", __func__, path_raw.c_str(), path.c_str());
         
         return fd;        
-        
     }
 
     void add(const std::string& path_raw, const item& v) {
         const std::string path = normalize(path_raw);
         assert(cache_.find(path) == cache_.end());
-        
-        std::cerr << "cache +added+ for path:" << path << std::endl;
         cache_[path] = v;
     }
     
     void update(const std::string& path_raw, const item& v) {
         const std::string path = normalize(path_raw);
-        std::cerr << "cache +updated+ for path:" << path << std::endl;
         cache_[path] = v;
     }
     
     std::vector<std::string> infolder(const std::string& path_raw) {
         std::string path = normalize(path_raw);
         
-        std::string folder_suffix = (get(path_raw)->resource.stat.st_mode || S_IFDIR) ? "/" : "";
+        std::string folder_suffix = (get(path_raw)->stat().st_mode || S_IFDIR) ? "/" : "";
         path += folder_suffix;
         
         const char *filename = strrchr(path.c_str(), '/');
@@ -175,7 +193,6 @@ public:
     
     virtual void remove(const std::string& path_raw) {
         const std::string path = normalize(path_raw);
-        std::cerr << "cache _removed_ for path:" << path << std::endl;
         cache_.erase(path);
         ::unlink(cache_filename(path_raw).c_str());
     }
