@@ -42,6 +42,20 @@ enum {
 };
 
 
+struct file_t {
+    
+    file_t(int fd = -1) : fd_(fd), remove_(false) {}
+    ~file_t() {
+        if (fd_ != -1) {
+            ::close(fd_);
+        }
+    }
+    
+private:
+    int fd_;
+    bool remove_;
+};
+
 template <typename T>
 inline std::string to_string(const T& rawdata) {
     const char* data = static_cast<const char*>(static_cast<const void*>(&rawdata));
