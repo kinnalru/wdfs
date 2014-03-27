@@ -33,6 +33,26 @@ private:
     int code_;
 };
 
+struct api_exception_t : public std::runtime_error
+{
+    api_exception_t(const std::string& message, int e)
+        : std::runtime_error((message + ": " + strerror(e)).c_str())
+        , errno_(e)
+    {}
+  
+    api_exception_t(int e)
+        : std::runtime_error(strerror(e))
+        , errno_(e)
+    {}
+    
+    int errno() const {
+        return errno_;
+    }
+    
+private:
+    int errno_;
+};
+
 /* used as mode for unify_path() */
 enum {
     ESCAPE     = 0x0,
@@ -44,17 +64,126 @@ enum {
 
 struct file_t {
     
-    file_t(int fd = -1) : fd_(fd), remove_(false) {}
+    file_t(const std::string& filename)
+        : filename_(filename)
+        , fd_(::open(filename.c_str(), O_RDWR))
+        , remove_(false)
+    {
+        if (fd_ == -1) {
+            throw api_exception_t("Can't open file", errno);
+        }
+        update_stat();
+    }
+    
     ~file_t() {
         if (fd_ != -1) {
             ::close(fd_);
         }
+        if (remove_) {
+            ::remove(filename_c._str());
+        }
     }
     
+    const struct stat& stat() const {return stat_;}
+    
+    void set_remove(bool r) {remove_ = r;}
+    
 private:
-    int fd_;
+  
+    file_t(const file_t& other) {}
+    file_t& operator=(const file_t& other) {}
+    
+  
+    void update_stat() {
+        if (::fstat(fd_, &stat_)) {
+            throw api_exception_t("Can't update file stat", errno);
+        }
+    }
+private:
+    const std::string filename_;
+    const int fd_;
     bool remove_;
+    struct stats stat_;
 };
+
+
+#define wrap_stat_field(field, type, object) \
+    type field() const {return object.st_##field;}; \
+    bool has_##field() const {return object.st_##field != 0;}; \
+    void update_##field(type f) {if (f) object.st_##field = f;};
+
+struct resource_t {
+    resource_t () {}
+    virtual ~resource_t() {}
+    
+    virtual const struct stat& stat() const = 0;
+    virtual struct stat& stat() = 0;
+    
+    wrap_stat_field(mtime, time_t, stat());
+    wrap_stat_field(size, off_t, stat());
+    wrap_stat_field(mode, mode_t, stat());
+};
+
+inline bool differ(const struct stat& s1, const struct stat s2) {
+    return s1.st_mtime != s2.st_mtime || s1.st_size != s2.st_size;
+}
+
+
+   
+class webdav_resource_t : public resource_t {
+    friend class boost::serialization::access;
+    
+    template<class Archive>
+    void serialize(Archive & ar, const unsigned int version)
+    {
+//         std::string statstr = to_string(stat);
+//         ar & statstr;
+//         if (auto startptr = from_string<struct stat>(statstr)) {
+//             stat = *startptr;
+//         }
+    }
+    
+public:
+    webdav_resource_t() {
+        memset(&stat, 0, sizeof(struct stat));
+    };
+    
+    webdav_resource_t(const struct stat& st) {
+        stat = st;
+    }
+    
+    virtual const struct stat& stat() const {return stat;}
+    virtual struct stat& stat() {return stat;}
+    
+//     bool differ(const webdav_resource_t& other) const {
+//         return ::differ(stat, other.stat);
+//     }
+//     
+//     void update_from(const webdav_resource_t& other) {
+//         update_mtime(other.mtime());
+//         update_size(other.size());
+//     }
+    
+    struct stat stat;
+};
+
+class cached_resource_t : public resource_t {
+  
+public:
+    cached_resource_t(const std::string& filename) 
+        : file_(filename)
+    {
+        
+    }
+    
+    virtual const struct stat& stat() const {return file_.stat();}
+    virtual struct stat& stat() {throw std::runtime_error("Can't assign stat in real file");}
+
+private:
+    file_t file_;
+};
+
+
 
 template <typename T>
 inline std::string to_string(const T& rawdata) {
@@ -87,53 +216,8 @@ std::unique_ptr<T> from_string(const std::string& strdata) {
     return rawdata;
 }
 
-#define wrap_stat_field(field, type, object) \
-    type field() const {return object.st_##field;}; \
-    bool has_##field() const {return object.st_##field != 0;}; \
-    void update_##field(type f) {if (f) object.st_##field = f;};
+
     
-inline bool differ(const struct stat& s1, const struct stat s2) {
-    return s1.st_mtime != s2.st_mtime || s1.st_size != s2.st_size;
-}
-    
-class webdav_resource_t {
-    friend class boost::serialization::access;
-    
-    template<class Archive>
-    void serialize(Archive & ar, const unsigned int version)
-    {
-        std::string statstr = to_string(stat);
-        ar & statstr;
-        if (auto startptr = from_string<struct stat>(statstr)) {
-            stat = *startptr;
-        }
-    }
-    
-public:
-    webdav_resource_t() {
-        memset(&stat, 0, sizeof(struct stat));
-    };
-    
-    webdav_resource_t(const struct stat& st) {
-        stat = st;
-    }
-    
-    
-    wrap_stat_field(mtime, time_t, stat);
-    wrap_stat_field(size, off_t, stat);
-    wrap_stat_field(mode, mode_t, stat);
-    
-    bool differ(const webdav_resource_t& other) const {
-        return ::differ(stat, other.stat);
-    }
-    
-    void update_from(const webdav_resource_t& other) {
-        update_mtime(other.mtime());
-        update_size(other.size());
-    }
-    
-    struct stat stat;
-};
 
 struct webdav_context_t {
     ne_session* session;
