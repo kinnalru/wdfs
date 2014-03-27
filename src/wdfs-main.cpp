@@ -209,10 +209,10 @@ struct readdir_ctx_t {
 
 /* infos about an open file. used by open(), read(), write() and release()   */
 struct fuse_file_t {
-    fuse_file_t() : /*fd(-1),*/ modified(false) {}
+    fuse_file_t() : fd(-1), modified(false) {}
     
-    //int fd;	/* this file's filehandle                            */
-    bool modified;	/* set true if the filehandle's content is modified  */
+    int fd;	        // this file's filehandle
+    bool modified;	// set true if the filehandle's content is modified 
 };
 
 
@@ -262,22 +262,23 @@ static int wdfs_getattr(const char *localpath, struct stat *stat)
     auto remotepath(get_remotepath(localpath));
     if (!remotepath) return -ENOMEM;
     
-    if (auto cached_stat = cache->stat(remotepath.get())) {
-        *stat = *cached_stat;
+    if (auto cached_resource = cache->get(remotepath.get())) {
+        *stat = cached_resource->stat();
     } 
     else {
         try {
             const stats_t stats = webdav_getattrs(session, remotepath);
             BOOST_FOREACH(auto p, stats) {
-                cache_t::item_p new_file(new webdav_resource_t(p.second));
-                if (cache_t::item_p old_file = cache->get(p.first)) {
-                    if (new_file->differ(*old_file)) {
-                        cache->update(p.first, new_file);
+                cache_t::item_p new_resource(new webdav_resource_t(p.second));
+                if (cache_t::item_p old_resource = cache->get(p.first)) {
+                    if (new_resource->differ(*old_resource)) {
+                        cache->update(p.first, new_resource);
+                        ::remove(cache->cache_filename(localpath).c_str());
                     }
                 }  
             }
             
-            *stat = *cache->stat(remotepath.get());
+            *stat = cache->get(remotepath.get())->stat();
         }
         catch (const webdav_exception_t& e) {
             fprintf(stderr, "## Error in %s(): %s\n", __func__, e.what());

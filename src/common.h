@@ -61,7 +61,7 @@ enum {
     LEAVESLASH = 0x2
 };
 
-
+/*
 struct file_t {
     
     file_t(const std::string& filename)
@@ -104,7 +104,7 @@ private:
     const int fd_;
     bool remove_;
     struct stat stat_;
-};
+};*/
 
 inline bool differ(const struct stat& s1, const struct stat s2) {
     return s1.st_mtime != s2.st_mtime || s1.st_size != s2.st_size;
@@ -132,7 +132,7 @@ struct resource_t {
 };
 
   
-class webdav_resource_t : public resource_t {
+class webdav_resource_t {
     friend class boost::serialization::access;
     
     template<class Archive>
@@ -154,8 +154,16 @@ public:
         stat_ = st;
     }
     
-    virtual const struct stat& stat() const {return stat_;}
-    virtual struct stat& stat() {return stat_;}
+    const struct stat& stat() const {return stat_;}
+    struct stat& stat() {return stat_;}
+    
+    virtual bool differ(const webdav_resource_t& other) const {
+        return ::differ(stat(), other.stat());
+    }
+    
+    wrap_stat_field(mtime, time_t, stat());
+    wrap_stat_field(size, off_t, stat());
+    wrap_stat_field(mode, mode_t, stat());
     
 //     bool differ(const webdav_resource_t& other) const {
 //         return ::differ(stat, other.stat);
@@ -169,23 +177,23 @@ public:
     struct stat stat_;
 };
 
-class cached_resource_t : public resource_t {
-  
-public:
-    cached_resource_t(const std::string& filename) 
-        : file_(filename)
-    {
-        
-    }
-    
-    virtual const struct stat& stat() const {return file_.stat();}
-    virtual struct stat& stat() {throw std::runtime_error("Can't assign stat in real file");}
-
-    file_t& file() {return file_;}
-    
-private:
-    file_t file_;
-};
+// class cached_resource_t : public resource_t {
+//   
+// public:
+//     cached_resource_t(const std::string& filename) 
+//         : file_(filename)
+//     {
+//         
+//     }
+//     
+//     virtual const struct stat& stat() const {return file_.stat();}
+//     virtual struct stat& stat() {throw std::runtime_error("Can't assign stat in real file");}
+// 
+//     file_t& file() {return file_;}
+//     
+// private:
+//     file_t file_;
+// };
 
 
 

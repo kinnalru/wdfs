@@ -71,7 +71,7 @@ class cache_t {
     }
     
 public:
-    typedef std::shared_ptr<resource_t> item_p;
+    typedef std::shared_ptr<webdav_resource_t> item_p;
     typedef std::map<std::string, item_p> data_t;
     
 
@@ -96,14 +96,14 @@ public:
     
     inline int size() const {return cache_.size();}
     
-    stat_p stat(const std::string& path_raw) const {
-        if (auto item = get(path_raw)) {
-            return stat_p(new struct stat(item->stat()));
-        }
-        else {
-            return stat_p();
-        }
-    }
+//     stat_p stat(const std::string& path_raw) const {
+//         if (auto item = get(path_raw)) {
+//             return stat_p(new struct stat(item->stat()));
+//         }
+//         else {
+//             return stat_p();
+//         }
+//     }
     
     void add(const std::string& path_raw, item_p item) {
         const std::string path = normalize(path_raw);
@@ -127,19 +127,19 @@ public:
         }
     }
     
-    item_p restore(const std::string& path_raw) {
-        auto cached_file = get(path_raw);
-        std::shared_ptr<cached_resource_t> new_file(new cached_resource_t(cache_filename(path_raw)));
-
-        if (new_file->differ(*cached_file)) {
-            new_file->file().set_remove(true);
-            return cached_file;
-        }
-        else {
-            update(path_raw, new_file);
-            return new_file;
-        }
-    }
+//     item_p restore(const std::string& path_raw) {
+//         auto cached_file = get(path_raw);
+//         std::shared_ptr<cached_resource_t> new_file(new cached_resource_t(cache_filename(path_raw)));
+// 
+//         if (new_file->differ(*cached_file)) {
+//             new_file->file().set_remove(true);
+//             return cached_file;
+//         }
+//         else {
+//             update(path_raw, new_file);
+//             return new_file;
+//         }
+//     }
     
     int create_file(const std::string& path_raw) const {
         const std::string path = cache_filename(path_raw);
