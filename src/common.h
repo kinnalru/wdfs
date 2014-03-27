@@ -45,7 +45,7 @@ struct api_exception_t : public std::runtime_error
         , errno_(e)
     {}
     
-    int errno() const {
+    int error() const {
         return errno_;
     }
     
@@ -80,7 +80,7 @@ struct file_t {
             ::close(fd_);
         }
         if (remove_) {
-            ::remove(filename_c._str());
+            ::remove(filename_.c_str());
         }
     }
     
@@ -90,7 +90,7 @@ struct file_t {
     
 private:
   
-    file_t(const file_t& other) {}
+    file_t(const file_t& other) : fd_(-1) {}
     file_t& operator=(const file_t& other) {}
     
   
@@ -103,9 +103,12 @@ private:
     const std::string filename_;
     const int fd_;
     bool remove_;
-    struct stats stat_;
+    struct stat stat_;
 };
 
+inline bool differ(const struct stat& s1, const struct stat s2) {
+    return s1.st_mtime != s2.st_mtime || s1.st_size != s2.st_size;
+}
 
 #define wrap_stat_field(field, type, object) \
     type field() const {return object.st_##field;}; \
@@ -119,17 +122,16 @@ struct resource_t {
     virtual const struct stat& stat() const = 0;
     virtual struct stat& stat() = 0;
     
+    virtual bool differ(const resource_t& other) const {
+        return ::differ(stat(), other.stat());
+    }
+    
     wrap_stat_field(mtime, time_t, stat());
     wrap_stat_field(size, off_t, stat());
     wrap_stat_field(mode, mode_t, stat());
 };
 
-inline bool differ(const struct stat& s1, const struct stat s2) {
-    return s1.st_mtime != s2.st_mtime || s1.st_size != s2.st_size;
-}
-
-
-   
+  
 class webdav_resource_t : public resource_t {
     friend class boost::serialization::access;
     
@@ -145,15 +147,15 @@ class webdav_resource_t : public resource_t {
     
 public:
     webdav_resource_t() {
-        memset(&stat, 0, sizeof(struct stat));
+        memset(&stat_, 0, sizeof(struct stat));
     };
     
     webdav_resource_t(const struct stat& st) {
-        stat = st;
+        stat_ = st;
     }
     
-    virtual const struct stat& stat() const {return stat;}
-    virtual struct stat& stat() {return stat;}
+    virtual const struct stat& stat() const {return stat_;}
+    virtual struct stat& stat() {return stat_;}
     
 //     bool differ(const webdav_resource_t& other) const {
 //         return ::differ(stat, other.stat);
@@ -164,7 +166,7 @@ public:
 //         update_size(other.size());
 //     }
     
-    struct stat stat;
+    struct stat stat_;
 };
 
 class cached_resource_t : public resource_t {
@@ -179,6 +181,8 @@ public:
     virtual const struct stat& stat() const {return file_.stat();}
     virtual struct stat& stat() {throw std::runtime_error("Can't assign stat in real file");}
 
+    file_t& file() {return file_;}
+    
 private:
     file_t file_;
 };

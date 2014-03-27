@@ -208,10 +208,10 @@ struct readdir_ctx_t {
 };
 
 /* infos about an open file. used by open(), read(), write() and release()   */
-struct file_t {
-    file_t() : fd(-1), modified(false) {}
+struct fuse_file_t {
+    fuse_file_t() : /*fd(-1),*/ modified(false) {}
     
-    int fd;	/* this file's filehandle                            */
+    //int fd;	/* this file's filehandle                            */
     bool modified;	/* set true if the filehandle's content is modified  */
 };
 
@@ -269,13 +269,12 @@ static int wdfs_getattr(const char *localpath, struct stat *stat)
         try {
             const stats_t stats = webdav_getattrs(session, remotepath);
             BOOST_FOREACH(auto p, stats) {
-                cache_t::item_p new_file(new cache_t::item(p.second));
+                cache_t::item_p new_file(new webdav_resource_t(p.second));
                 if (cache_t::item_p old_file = cache->get(p.first)) {
-                    if (!new_file->differ(*old_file)) {
-                        new_file->set_fd(old_file->fd());
+                    if (new_file->differ(*old_file)) {
+                        cache->update(p.first, new_file);
                     }
                 }  
-                cache->update(p.first, *new_file);                
             }
             
             *stat = *cache->stat(remotepath.get());
@@ -333,10 +332,10 @@ static void wdfs_readdir_propfind_callback(
 
     struct stat st;
     set_stat(st, results);
-    cache_t::item_p cached_file(new cache_t::item(st));
+    cache_t::item_p new_file(new webdav_resource_t(st));
     if (cache_t::item_p old_file = cache->get(remotepath)) {
-        if (!cached_file->differ(*old_file)) {
-            cached_file->set_fd(old_file->fd());
+        if (new_file->differ(*old_file)) {
+            cache->update(remotepath, new_file);
         }
     }
 
@@ -345,10 +344,8 @@ static void wdfs_readdir_propfind_callback(
         ctx->oldfiles.end()
     );
     
-    cache->update(remotepath, *cached_file);
-
     /* add directory entry */
-    st = cached_file->stat();
+    st = new_file->stat();
     if (ctx->filler(ctx->buf, filename.c_str(), &st, 0))
         fprintf(stderr, "## filler() error in %s()!\n", __func__);
 
@@ -418,48 +415,42 @@ static int wdfs_open(const char *localpath, struct fuse_file_info *fi)
 
     assert(localpath && fi);
 
-    std::unique_ptr<file_t> file(new file_t);
-
     auto remotepath = get_remotepath(localpath);
     if (!remotepath) return -ENOMEM;
     
-    webdav_resource_t resource_full; //resource from PROPFIND request
-    webdav_resource_t resource_new;
-    if (get_head(session, remotepath.get(), &resource_new)) return -ENOENT;
+    std::shared_ptr<webdav_resource_t> new_resource(new webdav_resource_t());
+    if (get_head(session, remotepath.get(), new_resource.get())) return -ENOENT;
 
-    if (auto cached_file = cache->get(remotepath.get())) {
-        resource_full = cached_file->resource();
-        
-        if (resource_new.differ(cached_file->resource())) {
+    if (auto old_resource = cache->get(remotepath.get())) {
+
+        if (new_resource->differ(*old_resource)) {
             wdfs_pr("   -- new resource different - invalidate cache\n");
             cache->remove(remotepath.get());
-            cached_file.reset();
         }
-        else if (cached_file->fd() == -1) {
-            wdfs_pr("   -- There is no file in cache - try to restore cache from disk...\n");
-            cached_file = cache->restore(remotepath.get());
-            if (cached_file->fd() == -1) {
-                wdfs_pr("   -- Filecache +miss+ NOT RESTORED\n");             
-                cache->remove(remotepath.get());
-                cached_file.reset();
-            }
-            else {
-                wdfs_pr("   -- Filecache +hit+ RESTORED %d\n", cached_file->fd());             
-            }
-        }
-        
-        
-        if (cached_file && resource_new.stat.st_mtime != cached_file->stat().st_mtime) {
-            wdfs_pr("   ++ ETag and sizes are same but modtime different - update cache\n");
+        else {
+            wdfs_pr("   -- new resource is same - restoring from cache...\n");
             
-            //cached_file->resource.update_from(resource_new); //TODO FIXME LAST
-            cache->update(remotepath.get(), *cached_file);
+            try {
+                std::shared_ptr<cached_resource_t> cached_resource(new cached_resource_t(cache->cache_filename(localpath)));
+                if (cached_resource->differ(*old_resource)) {
+                    wdfs_pr("   -- resource restored, but differ - invalidate cache\n");
+                    cached_resource->file().set_remove(true);
+                    cache->remove(remotepath.get());
+                }
+                else {
+                    wdfs_pr("   -- resource restored and same - good luck!\n");
+                    cache->update(remotepath.get(), cached_resource);
+                }
+            }
+            catch (...) {
+                wdfs_pr("   -- can't restore resource - invalidate cache\n");
+                cache->remove(remotepath.get());
+            }
         }
     }
 
     if (auto cached_file = cache->get(remotepath.get())) {
         wdfs_pr("   ++ Filecache +hit+ no download needed\n");
-        file->fd = cached_file->fd();
     }
     else {
         wdfs_pr("   ++ Filecache +miss+ download file\n");

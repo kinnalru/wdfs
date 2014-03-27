@@ -431,13 +431,13 @@ inline void fill_resource(webdav_resource_t* resource, ne_request* request) {
     const char *lastmodified = ne_get_response_header(request, "Last-Modified");
     if (!lastmodified) lastmodified = ne_get_response_header(request, "Date");
 
-    resource->stat.st_mtime = (lastmodified)
+    resource->stat().st_mtime = (lastmodified)
         ? ne_rfc1123_parse(lastmodified)
         : 0;
         
     const char *contentlength = ne_get_response_header(request, "Content-Length");
     
-    resource->stat.st_size = (contentlength)
+    resource->stat().st_size = (contentlength)
         ? atoll(contentlength)
         : 0;
 }
