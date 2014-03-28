@@ -218,16 +218,6 @@ struct fuse_file_t {
 };
 
 
-/* returns the malloc()ed escaped remotepath on success or NULL on error */
-// static std::shared_ptr<char> get_remotepath(const char *localpath)
-// {
-//     assert(localpath);
-//     std::shared_ptr<char> remotepath(ne_concat(remotepath_basedir, localpath, NULL), free);
-//     return (remotepath) 
-//         ? std::shared_ptr<char>(unify_path(remotepath.get(), ESCAPE | LEAVESLASH), free)
-//         : std::shared_ptr<char>();
-// }
-
 /* returns a filehandle for read and write on success or -1 on error */
 static int get_filehandle()
 {
@@ -264,23 +254,21 @@ static int wdfs_getattr(const char *localpath, struct stat *stat)
     auto remotepath(wdfs->get_remotepath(localpath));
     if (!remotepath) return -ENOMEM;
     
+    auto fullpath(wdfs->get_fullpath(localpath));
+    if (!fullpath) return -ENOMEM;
+    
+    wdfs_dbg("localpath: [%s]\n", localpath);      
+    wdfs_dbg("remotepath: [%s]\n", remotepath.get());
+    wdfs_dbg("fullpath: [%s]\n", fullpath.get());      
+    
     if (auto cached_resource = cache->get(remotepath.get())) {
         *stat = cached_resource->stat();
     } 
     else {
         try {
             const stats_t stats = webdav_getattrs(session, remotepath);
-            BOOST_FOREACH(auto p, stats) {
-                cache_t::item_p new_resource(new webdav_resource_t(p.second));
-                if (cache_t::item_p old_resource = cache->get(p.first)) {
-                    if (new_resource->differ(*old_resource)) {
-                        cache->update(p.first, new_resource);
-                        ::remove(cache->cache_filename(localpath).c_str());
-                    }
-                }  
-            }
-            
-            *stat = cache->get(remotepath.get())->stat();
+            cache->update(stats);
+            *stat = cache->get(fullpath.get())->stat();
         }
         catch (const webdav_exception_t& e) {
             fprintf(stderr, "## Error in %s(): %s\n", __func__, e.what());
@@ -322,7 +310,7 @@ static void wdfs_readdir_propfind_callback(
     }
 
     /* don't add this directory to itself */
-    if (!strcmp(remotepath2, remotepath1)) {
+    if (strcmp(remotepath2, remotepath1) == 0) {
         free_chars(&remotepath, &remotepath1, &remotepath2, NULL);
         return;
     }
@@ -338,6 +326,7 @@ static void wdfs_readdir_propfind_callback(
     cache_t::item_p new_file(new webdav_resource_t(st));
     if (cache_t::item_p old_file = cache->get(remotepath)) {
         if (new_file->differ(*old_file)) {
+            cache->remove(remotepath);
             cache->update(remotepath, new_file);
         }
     }
@@ -930,7 +919,7 @@ static int wdfs_statfs(const char *localpath, struct statvfs *buf)
 
     cache.reset(new cache_t(wdfs_cfg.cachedir, wdfs_cfg.webdav_remotebasedir));
     
-    wdfs.reset(new wdfs_controller_t(wdfs_cfg.webdav_remotebasedir));
+    wdfs.reset(new wdfs_controller_t(wdfs_cfg.webdav_remotebasedir, wdfs_cfg.webdav_remotepath));
 
     try {
         std::ifstream stream((wdfs_cfg.cachedir + "cache").c_str());
@@ -1154,6 +1143,7 @@ int main(int argc, char *argv[])
     if (remotepath_basedir) {
         wdfs_cfg.webdav_remotebasedir = remotepath_basedir;
     }
+    wdfs_cfg.webdav_remotepath = uri->path;
 
     /* finally call fuse */
     status_program_exec = call_fuse_main(&options);

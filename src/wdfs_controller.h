@@ -10,8 +10,8 @@
 
 struct wdfs_controller_t {
     
-    wdfs_controller_t(const std::string& rbd)
-        : rbd_(rbd)
+    wdfs_controller_t(const std::string& rbd, const std::string& rp)
+        : rbd_(rbd), rp_(rp)
     {} 
 
     
@@ -25,8 +25,18 @@ struct wdfs_controller_t {
             : std::shared_ptr<char>();
     }
     
+    string_p get_fullpath(const char *localpath)
+    {
+        assert(localpath);
+        string_p remotepath(ne_concat(rp_.c_str(), localpath, NULL), free);
+        return (remotepath) 
+            ? std::shared_ptr<char>(unify_path(remotepath.get(), ESCAPE | LEAVESLASH), free)
+            : std::shared_ptr<char>();
+    }
+    
 private:
     const std::string rbd_;
+    const std::string rp_;
 };
 
 

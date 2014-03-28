@@ -490,7 +490,7 @@ void set_stat(struct stat& stat, const ne_prop_result_set* results)
 {
     wdfs_dbg("%s()\n", __func__);
 
-    const char *resourcetype, *contentlength, *lastmodified, *creationdate/*, *executable*/, *modestr/*, *etagstr*/;
+    const char *resourcetype, *contentlength, *lastmodified, *creationdate, *executable, *modestr/*, *etagstr*/;
 
     assert(results);
 
@@ -499,12 +499,14 @@ void set_stat(struct stat& stat, const ne_prop_result_set* results)
     contentlength   = get_helper(results, LENGTH);
     lastmodified    = get_helper(results, MODIFIED);
     creationdate    = get_helper(results, CREATION);
-    //  executable      = get_helper(results, EXECUTE);
+    executable      = get_helper(results, EXECUTE);
     modestr         = get_helper(results, PERMISSIONS);
 //     etagstr         = get_helper(results, ETAG);
 
     int mode = 0;
 
+    wdfs_dbg("1\n");
+    
     /* webdav collection == directory entry */
     if (resourcetype != NULL && !strstr("<collection", resourcetype)) {
         /* "DT_DIR << 12" equals "S_IFDIR" */
@@ -517,29 +519,35 @@ void set_stat(struct stat& stat, const ne_prop_result_set* results)
         stat.st_size = (contentlength) ? atoll(contentlength) : 0;
     }
 
+    wdfs_dbg("2\n");
     stat.st_mode = mode;
 
     stat.st_nlink = 1;
     stat.st_atime = time(NULL);
 
+    wdfs_dbg("3\n");
     if (lastmodified != NULL)
         stat.st_mtime = ne_rfc1123_parse(lastmodified);
     else
         stat.st_mtime = 0;
 
+    wdfs_dbg("4\n");
     if (creationdate != NULL)
         stat.st_ctime = ne_iso8601_parse(creationdate);
     else
         stat.st_ctime = 0;
 
+    wdfs_dbg("5\n");
     /* calculate number of 512 byte blocks */
     stat.st_blocks  = (stat.st_size + 511) / 512;
 
+    wdfs_dbg("6\n");
     /* no need to set a restrict mode, because fuse filesystems can
         * only be accessed by the user that mounted the filesystem.  */
     stat.st_mode &= ~umask(0);
     stat.st_uid = getuid();
     stat.st_gid = getgid();
+    wdfs_dbg("7\n");
 }
 
 
@@ -570,7 +578,7 @@ int handle_redirect(std::shared_ptr<char>& remotepath)
 
 /* this method is called by ne_simple_propfind() from wdfs_getattr() for a
  * specific file. it sets the file's attributes and and them to the cache. */
-static void wdfs_getattr_propfind_callback(
+static void webdav_getattrs_propfind_callback(
 #if NEON_VERSION >= 26
     void *userdata, const ne_uri* href_uri, const ne_prop_result_set *results)
 #else
@@ -593,6 +601,8 @@ static void wdfs_getattr_propfind_callback(
 #if NEON_VERSION >= 26
     FREE(remotepath);
 #endif
+    
+    wdfs_dbg("%s EXIT\n", __func__);  
 }
 
 stats_t webdav_getattrs(ne_session* session, std::shared_ptr<char>& remotepath)
@@ -601,19 +611,26 @@ stats_t webdav_getattrs(ne_session* session, std::shared_ptr<char>& remotepath)
         
     int ret = ne_simple_propfind(
         session, remotepath.get(), NE_DEPTH_ZERO, &prop_names[0],
-        wdfs_getattr_propfind_callback, &stats);
+        webdav_getattrs_propfind_callback, &stats);
+    
+    wdfs_dbg("%s 1\n", __func__);  
+    
     /* handle the redirect and retry the propfind with the new target */
     if (ret == NE_REDIRECT && wdfs_cfg.redirect == true) {
         if (handle_redirect(remotepath))
             throw webdav_exception_t(std::string("WEBDAV error in ") + __func__, -ENOENT);
+        
+        wdfs_dbg("%s 2\n", __func__);  
         ret = ne_simple_propfind(
             session, remotepath.get(), NE_DEPTH_ZERO, &prop_names[0],
-            wdfs_getattr_propfind_callback, &stats);
+            webdav_getattrs_propfind_callback, &stats);
+         wdfs_dbg("%s 3\n", __func__);  
     }
+     wdfs_dbg("%s 4\n", __func__);  
     if (ret != NE_OK) {
         throw webdav_exception_t(std::string("WEBDAV error in ") + __func__ + " :" + ne_get_error(session), -ENOENT);
     }
-    
+     wdfs_dbg("%s 5\n", __func__);  
     return stats;
 }
 

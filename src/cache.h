@@ -4,7 +4,7 @@
 #include <string>
 #include <map>
 #include <memory>
-#include <boost/concept_check.hpp>
+#include <boost/foreach.hpp>
 
 #include "common.h"
 
@@ -107,6 +107,7 @@ public:
     
     void add(const std::string& path_raw, item_p item) {
         const std::string path = normalize(path_raw);
+        wdfs_dbg("%s(%s) noramalized: [%s]\n", __func__, path_raw.c_str(), path.c_str());
         assert(cache_.find(path) == cache_.end());
         cache_[path] = item;
     }
@@ -115,18 +116,40 @@ public:
         const std::string path = normalize(path_raw);
         cache_[path] = item;
     }    
+
+    void update(const stats_t& stats) {
+        wdfs_dbg("%s()\n", __func__);
+        BOOST_FOREACH(auto p, stats) {
+            wdfs_dbg("  >> Handling [%s]\n", p.first.c_str());
+            cache_t::item_p new_item(new webdav_resource_t(p.second));
+            if (cache_t::item_p old_item = get(p.first)) {
+                wdfs_dbg("  >> 1\n");
+                if (new_item->differ(*old_item)) {
+                    remove(p.first);
+                    add(p.first, new_item);
+                }
+            }  
+            wdfs_dbg("  >> Handling finished[%s]\n", p.first.c_str());
+        }
+        wdfs_dbg("%s() EXIT\n", __func__);
+    }
     
     virtual item_p get(const std::string& path_raw) const {
         const std::string path = normalize(path_raw);
+        wdfs_dbg("%s(%s) noramalized: [%s]\n", __func__, path_raw.c_str(), path.c_str());
         data_t::const_iterator it = cache_.find(path);
+        wdfs_dbg("  >> 1\n");
         if (it != cache_.end()) {
+            wdfs_dbg("  >> 2\n");
             return it->second;
         }
         else {
+            wdfs_dbg("  >> 3\n");
             return item_p();
         }
     }
     
+  
 //     item_p restore(const std::string& path_raw) {
 //         auto cached_file = get(path_raw);
 //         std::shared_ptr<cached_resource_t> new_file(new cached_resource_t(cache_filename(path_raw)));
@@ -188,8 +211,9 @@ public:
     
     virtual void remove(const std::string& path_raw) {
         const std::string path = normalize(path_raw);
+        wdfs_dbg("%s(%s) normalized: [%s] cached filename: [%s]\n", __func__, path_raw.c_str(), path.c_str(), cache_filename(path_raw).c_str());
         cache_.erase(path);
-        ::unlink(cache_filename(path_raw).c_str());
+        ::remove(cache_filename(path_raw).c_str());
     }
     
 private:

@@ -53,6 +53,7 @@ struct wdfs_conf {
     std::string webdav_resource;
 
     std::string webdav_remotebasedir;
+    std::string webdav_remotepath;
     /* path to mountpoint */
     std::string mountpoint;
     /* path to folder where cache(attrs AND files) located */
