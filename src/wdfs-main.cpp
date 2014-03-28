@@ -419,6 +419,8 @@ static int wdfs_open(const char *localpath, struct fuse_file_info *fi)
     auto remotepath = get_remotepath(localpath);
     if (!remotepath) return -ENOMEM;
     
+    std::unique_ptr<fuse_file_t> file(new fuse_file_t());
+    
     std::shared_ptr<webdav_resource_t> new_resource(new webdav_resource_t());
     if (get_head(session, remotepath.get(), new_resource.get())) return -ENOENT;
 
@@ -431,31 +433,30 @@ static int wdfs_open(const char *localpath, struct fuse_file_info *fi)
         else {
             wdfs_pr("   -- new resource is same - restoring from cache...\n");
             
-            try {
-                std::shared_ptr<cached_resource_t> cached_resource(new cached_resource_t(cache->cache_filename(localpath)));
-                if (cached_resource->differ(*old_resource)) {
-                    wdfs_pr("   -- resource restored, but differ - invalidate cache\n");
-                    cached_resource->file().set_remove(true);
-                    cache->remove(remotepath.get());
+            const std::string filename = cache->cache_filename(remotepath.get());
+            file->fd = ::open(filename.c_str(), O_RDWR);
+            if (file->fd != -1) {
+                struct stat st;
+                if (::fstat(file->fd, &st)) {
+                    ::close(file->fd);
+                    file->fd = -1;
+                    ::remove(filename.c_str());
+                } 
+                else if(differ(st, new_resource->stat())) {
+                    ::close(file->fd);
+                    file->fd = -1;
+                    ::remove(filename.c_str());
                 }
-                else {
-                    wdfs_pr("   -- resource restored and same - good luck!\n");
-                    cache->update(remotepath.get(), cached_resource);
-                }
-            }
-            catch (...) {
-                wdfs_pr("   -- can't restore resource - invalidate cache\n");
-                cache->remove(remotepath.get());
             }
         }
     }
 
-    if (auto cached_file = cache->get(remotepath.get())) {
+    if (file->fd != -1) {
         wdfs_pr("   ++ Filecache +hit+ no download needed\n");
     }
     else {
         wdfs_pr("   ++ Filecache +miss+ download file\n");
-        file->fd = cache->create_file(localpath);
+        file->fd = cache->create_file(remotepath.get());
         if (file->fd == -1) return -EIO;
         
         /* try to lock, if locking is enabled and file is not below svn_basedir. */
@@ -484,11 +485,8 @@ static int wdfs_open(const char *localpath, struct fuse_file_info *fi)
             return -ENOENT;        
         }
 
-        resource_full.update_from(resource_new);
-        resource_full.update_from(ctx.resource);
-        cached_file_t cached_file1(resource_full, file->fd);
         wdfs_pr("   ++ File downloaded successfuly\n");
-        cache->update(remotepath.get(), cached_file1);
+        cache->update(remotepath.get(), new_resource);
     }
 
 
@@ -508,7 +506,7 @@ static int wdfs_read(
     wdfs_dbg("%s(%s)\n", __func__, localpath); 
     assert(localpath && buf && fi);
 
-    file_t *file = reinterpret_cast<file_t*>(fi->fh);
+    fuse_file_t *file = reinterpret_cast<fuse_file_t*>(fi->fh);
 
     std::cerr << "read from fd:" << file->fd << std::endl;
     
@@ -527,7 +525,7 @@ static int wdfs_write(
     wdfs_dbg("%s(%s)\n", __func__, localpath); 
     assert(localpath && buf && fi);
 
-    file_t *file = reinterpret_cast<file_t*>(fi->fh);
+    fuse_file_t *file = reinterpret_cast<fuse_file_t*>(fi->fh);
 
     int ret = pwrite(file->fd, buf, size, offset);
     if (ret < 0) wdfs_err("pwrite() error: %d\n", ret);
@@ -549,7 +547,7 @@ static int wdfs_release(const char *localpath, struct fuse_file_info *fi)
     wdfs_dbg("%s(%s)\n", __func__, localpath); 
     assert(localpath);
 
-    file_t *file = reinterpret_cast<file_t*>(fi->fh);
+    fuse_file_t *file = reinterpret_cast<fuse_file_t*>(fi->fh);
 
     auto remotepath(get_remotepath(localpath));
     if (!remotepath) return -ENOMEM;
@@ -570,7 +568,7 @@ static int wdfs_release(const char *localpath, struct fuse_file_info *fi)
             }
             
             //cached_file->resource.update_from(ctx.resource); //TODO FIXME LAST
-            cache->update(remotepath.get(), *cached_file);
+            cache->update(remotepath.get(), cached_file);
         }
         
         wdfs_dbg("%s(): PUT the file to the server\n", __func__); 
@@ -628,20 +626,17 @@ static int wdfs_truncate(const char *localpath, off_t size)
     if (!remotepath) return -ENOMEM;
 
     if (auto cached_file = cache->get(remotepath.get())) {
-        int fd = cached_file->fd();
-        if (fd != -1) {
-            if (int ret = ftruncate(fd, size)) {
-                fprintf(stderr, "## ftruncate() error: %d\n", ret);
-                return -EIO;                
-            }
-            else {
-                //cached_file->resource.stat.st_size = size; //TODO FIXME
-                /* calculate number of 512 byte blocks */
-                //cached_file->resource.stat.st_blocks = (cached_file->resource.stat.st_size + 511) / 512;//TODO FIXME
-                cache->update(remotepath.get(), *cached_file);
-            }
-            return 0;
+        //TODO FIXME LAST update on server?
+        if (::truncate(cache->cache_filename(remotepath.get()).c_str(), size)) {
+            fprintf(stderr, "## ftruncate() error: %d\n", 123123);            
+            ::remove(cache->cache_filename(remotepath.get()).c_str());
         }
+
+        cached_file->stat().st_size = size;
+        /* calculate number of 512 byte blocks */
+        cached_file->stat().st_blocks = (cached_file->stat().st_size + 511) / 512;
+        cache->update(remotepath.get(), cached_file);
+        return 0;
     }
 
     int ret;
@@ -707,7 +702,7 @@ static int wdfs_ftruncate(
     auto remotepath = get_remotepath(localpath);
     if (!remotepath) return -ENOMEM;
 
-    struct file_t *file = (struct file_t*)(uintptr_t)fi->fh;
+    fuse_file_t* file = reinterpret_cast<fuse_file_t*>(fi->fh);
 
     if (int ret = ftruncate(file->fd, size)) {
         fprintf(stderr, "## ftruncate() error: %d\n", ret);
@@ -721,10 +716,10 @@ static int wdfs_ftruncate(
     /* update the cache item of the ftruncate()d file */
     cache_t::item_p cached_file = cache->get(remotepath.get());
     assert(cached_file);
-    //cached_file->resource.stat.st_size = size;//TODO FIXME
+    cached_file->stat().st_size = size;
     /* calculate number of 512 byte blocks */
-    //cached_file->resource.stat.st_blocks	= (cached_file->resource.stat.st_size + 511) / 512;//TODO FIXME
-    cache->update(remotepath.get(), *cached_file);
+    cached_file->stat().st_blocks	= (cached_file->stat().st_size + 511) / 512;
+    cache->update(remotepath.get(), cached_file);
 
     return 0;
 }
@@ -878,7 +873,7 @@ int wdfs_chmod(const char *localpath, mode_t mode)
     cache_t::item_p cached_file = cache->get(remotepath.get());
     assert(cached_file);
     
-    webdav_context_t ctx{session, cached_file->resource()};  
+    webdav_context_t ctx{session, *cached_file};  
     hook_helper_t hooker(session, &ctx);
     
     if (ne_proppatch(session, remotepath.get(), ops)) {
@@ -887,7 +882,7 @@ int wdfs_chmod(const char *localpath, mode_t mode)
     }
     
     //cached_file->resource = ctx.resource;//TODO FIXME
-    cache->update(remotepath.get(), *cached_file);
+    cache->update(remotepath.get(), cached_file);
     
     return 0;
 }
@@ -936,7 +931,7 @@ static int wdfs_statfs(const char *localpath, struct statvfs *buf)
     try {
         std::ifstream stream((wdfs.cachedir + "cache").c_str());
         boost::archive::text_iarchive oa(stream);
-        oa >> *cache;
+        //oa >> *cache;
     }
     catch(const std::exception& e) {
         wdfs_dbg("%s(): can't load cache\n", __func__);
@@ -957,7 +952,7 @@ static void wdfs_destroy(void*)
     try {
         std::ofstream stream((wdfs.cachedir + "cache").c_str());
         boost::archive::text_oarchive oa(stream);
-        oa << *cache;
+        //oa << *cache;
         cache.reset();
     }
     catch(const std::exception& e) {
