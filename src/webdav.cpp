@@ -168,7 +168,7 @@ static int verify_ssl_certificate(
 	free_chars(&issued_to, &issued_by, NULL);
 
 	/* don't prompt the user if the parameter "-ac" was passed to wdfs */
-	if (wdfs.accept_certificate == true)
+	if (wdfs_cfg.accept_certificate == true)
 		return 0;
 
 	/* prompt the user wether he/she wants to accept this certificate */
@@ -338,7 +338,7 @@ int lockfile(const char *remotepath, const int timeout)
 
 	/* we already hold a lock for this file, simply return 0 */
 	if (lock != NULL) {
-		if (wdfs.debug == true)
+		if (wdfs_cfg.debug == true)
 			fprintf(stderr, "++ file '%s' is already locked.\n", remotepath);
 		return 0;
 	}
@@ -360,7 +360,7 @@ int lockfile(const char *remotepath, const int timeout)
 		return 1;
 	} else {
 		ne_lockstore_add(store, lock);
-		if (wdfs.debug == true)
+		if (wdfs_cfg.debug == true)
 			fprintf(stderr, "++ locked file '%s'.\n", remotepath);
 	}
 
@@ -390,7 +390,7 @@ int unlockfile(const char *remotepath)
 		/* on success remove the lock from the store and destroy the lock */
 		ne_lockstore_remove(store, lock);
 		ne_lock_destroy(lock);
-		if (wdfs.debug == true)
+		if (wdfs_cfg.debug == true)
 			fprintf(stderr, "++ unlocked file '%s'.\n", remotepath);
 	}
 
@@ -412,7 +412,7 @@ void unlock_all_files()
 					"## ne_unlock() error:\n"
 				 	"## could _not_ unlock file '%s'.\n", this_lock->uri.path);
 			} else {
-				if (wdfs.debug == true)
+				if (wdfs_cfg.debug == true)
 					fprintf(stderr,
 						"++ unlocked file '%s'.\n", this_lock->uri.path);
 			}
@@ -421,7 +421,7 @@ void unlock_all_files()
 		}
 
 		/* finally destroy the lockstore */
-		if (wdfs.debug == true)
+		if (wdfs_cfg.debug == true)
 			fprintf(stderr, "++ destroying lockstore.\n");
 		ne_lockstore_destroy(store);
 	}
@@ -603,7 +603,7 @@ stats_t webdav_getattrs(ne_session* session, std::shared_ptr<char>& remotepath)
         session, remotepath.get(), NE_DEPTH_ZERO, &prop_names[0],
         wdfs_getattr_propfind_callback, &stats);
     /* handle the redirect and retry the propfind with the new target */
-    if (ret == NE_REDIRECT && wdfs.redirect == true) {
+    if (ret == NE_REDIRECT && wdfs_cfg.redirect == true) {
         if (handle_redirect(remotepath))
             throw webdav_exception_t(std::string("WEBDAV error in ") + __func__, -ENOENT);
         ret = ne_simple_propfind(

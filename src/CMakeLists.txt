@@ -28,6 +28,7 @@ set(HEADERS
 	common.h
 	config.h
 	wdfs-main.h
+	wdfs_controller.h
 	webdav.h
 )
 
@@ -36,6 +37,7 @@ set(SOURCES
 	webdav.cpp
 	wdfs-main.cpp
 	common.cpp
+	wdfs_controller.cpp
 )
 
 add_executable(${TARGET} ${HEADERS} ${SOURCES})

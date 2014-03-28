@@ -15,6 +15,7 @@
 
 typedef struct ne_session_s ne_session;
 typedef boost::optional<std::string> etag_t;
+typedef std::shared_ptr<char> string_p;
 
 typedef std::map<std::string, struct stat> stats_t;
 
@@ -239,17 +240,17 @@ struct webdav_context_t {
 
 /*макрос для печати отладочной информации. Если приживется...*/
 #define wdfs_dbg(format, arg...) do { \
-        if (wdfs.debug == true) \
+        if (wdfs_cfg.debug == true) \
             fprintf(stderr,">>  " format, ## arg);\
     } while (0)
     
 #define wdfs_err(format, arg...) do { \
-        if (wdfs.debug == true) \
+        if (wdfs_cfg.debug == true) \
             fprintf(stderr,"##  " format, ## arg);\
     } while (0)    
     
 #define wdfs_pr(format, arg...) do { \
-        if (wdfs.debug == true) \
+        if (wdfs_cfg.debug == true) \
             fprintf(stderr, format, ## arg);\
     } while (0)    
 

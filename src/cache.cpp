@@ -91,7 +91,7 @@ static int cache_control_thread_callback(void *key, void *value, void *userdata)
 {
 	struct cache_item *item = (struct cache_item *)value;
 	if (cache_item_timed_out(item->timeout)) {
-		if (wdfs.debug == true) {
+		if (wdfs_cfg.debug == true) {
 			fprintf(stderr,
 				"** cache control thread: "
 				"item has timed out and is removed '%s'\n", (char*)key);
@@ -147,7 +147,7 @@ void cache_initialize()
  * the hash table. */
 void cache_destroy()
 {
-	if (wdfs.debug == true)
+	if (wdfs_cfg.debug == true)
 		fprintf(stderr,
 			"** destroying %d cache items\n", g_hash_table_size(cache));
 	/* exit cache control thread */
@@ -182,7 +182,7 @@ void cache_add_item(struct stat *stat, const char *remotepath)
 	g_hash_table_insert(cache, strdup(remotepath2), item);
 	pthread_mutex_unlock(&cache_mutex);
 
-	if (wdfs.debug == true)
+	if (wdfs_cfg.debug == true)
 		fprintf(stderr, "** added cache item for '%s'\n", remotepath2);
 	FREE(remotepath2);
 }
@@ -205,7 +205,7 @@ void cache_delete_item(const char *remotepath)
 		(struct cache_item *)g_hash_table_lookup(cache, remotepath2);
 	if (item != NULL) {
 		g_hash_table_remove(cache, remotepath2);
-		if (wdfs.debug == true)
+		if (wdfs_cfg.debug == true)
 			fprintf(stderr, "** removed cache item for '%s'\n", remotepath2);
 	}
 	pthread_mutex_unlock(&cache_mutex);
@@ -237,17 +237,17 @@ int cache_get_item(struct stat *stat, const char *remotepath)
 		if (!cache_item_timed_out(item->timeout)) {
 			*stat = item->stat;
 			ret = 0;
-			if (wdfs.debug == true)
+			if (wdfs_cfg.debug == true)
 				fprintf(stderr, "** cache hit for '%s'\n", remotepath2);
 		/* if this cache item has timed out, remove it */
 		} else {
-			if (wdfs.debug == true)
+			if (wdfs_cfg.debug == true)
 				fprintf(stderr, "** cache item timed out '%s'\n", remotepath2);
 			cache_delete_item(remotepath2);
 		}
 	} else {
 		pthread_mutex_unlock(&cache_mutex);
-		if (wdfs.debug == true)
+		if (wdfs_cfg.debug == true)
 			fprintf(stderr, "** <no> cache hit for '%s'\n", remotepath2);
 	}
 	FREE(remotepath2);

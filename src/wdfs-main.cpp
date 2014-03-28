@@ -42,6 +42,7 @@
 #include <boost/foreach.hpp>
 
 #include "wdfs-main.h"
+#include "wdfs_controller.h"
 #include "webdav.h"
 #include "cache.h"
 
@@ -59,6 +60,7 @@
 #define ETERNITY_LOCK 3
 
 std::unique_ptr<cache_t> cache;
+std::unique_ptr<wdfs_controller_t> wdfs;
 
 static void print_help();
 static int call_fuse_main(struct fuse_args *args);
@@ -76,7 +78,7 @@ const char *project_name = PACKAGE_NAME "/" PACKAGE_VERSION;
 const char *project_uri = "http://noedler.de/projekte/wdfs/";
 
 /* init settings with default values */
-struct wdfs_conf wdfs = [] () {
+struct wdfs_conf wdfs_cfg = [] () {
     struct wdfs_conf w;
     w.debug = false;
     w.accept_certificate = false;
@@ -162,10 +164,10 @@ static int wdfs_opt_proc(
         case KEY_LOCKING_MODE:
             if (option[3] != '\0' || option[2] < '0' || option[2] > '3') {
                 fprintf(stderr, "%s: unknown locking mode '%s'\n",
-                wdfs.program_name, option + 2);
+                wdfs_cfg.program_name, option + 2);
                 exit(1);
             } else {
-                wdfs.locking_mode = option[2] - '0';
+                wdfs_cfg.locking_mode = option[2] - '0';
             }
             return 0;
 
@@ -173,13 +175,13 @@ static int wdfs_opt_proc(
             return 0;
 
         case FUSE_OPT_KEY_NONOPT:
-            if (wdfs.webdav_resource.empty() && 
+            if (wdfs_cfg.webdav_resource.empty() && 
                     strncmp(option, "http", 4) == 0) {
-                wdfs.webdav_resource = option;
+                wdfs_cfg.webdav_resource = option;
                 return 0;
             }
-            else if (wdfs.mountpoint.empty()) {
-                wdfs.mountpoint = option;
+            else if (wdfs_cfg.mountpoint.empty()) {
+                wdfs_cfg.mountpoint = option;
                 return 1;
             }
             return 1;
@@ -189,7 +191,7 @@ static int wdfs_opt_proc(
 
         default:
             fprintf(stderr, "%s: unknown option '%s'\n",
-                wdfs.program_name, option);
+                wdfs_cfg.program_name, option);
             exit(1);
     }
 }
@@ -217,14 +219,14 @@ struct fuse_file_t {
 
 
 /* returns the malloc()ed escaped remotepath on success or NULL on error */
-static std::shared_ptr<char> get_remotepath(const char *localpath)
-{
-    assert(localpath);
-    std::shared_ptr<char> remotepath(ne_concat(remotepath_basedir, localpath, NULL), free);
-    return (remotepath) 
-        ? std::shared_ptr<char>(unify_path(remotepath.get(), ESCAPE | LEAVESLASH), free)
-        : std::shared_ptr<char>();
-}
+// static std::shared_ptr<char> get_remotepath(const char *localpath)
+// {
+//     assert(localpath);
+//     std::shared_ptr<char> remotepath(ne_concat(remotepath_basedir, localpath, NULL), free);
+//     return (remotepath) 
+//         ? std::shared_ptr<char>(unify_path(remotepath.get(), ESCAPE | LEAVESLASH), free)
+//         : std::shared_ptr<char>();
+// }
 
 /* returns a filehandle for read and write on success or -1 on error */
 static int get_filehandle()
@@ -259,7 +261,7 @@ static int wdfs_getattr(const char *localpath, struct stat *stat)
     wdfs_dbg("%s(%s)\n", __func__, localpath);      
     assert(localpath && stat);
 
-    auto remotepath(get_remotepath(localpath));
+    auto remotepath(wdfs->get_remotepath(localpath));
     if (!remotepath) return -ENOMEM;
     
     if (auto cached_resource = cache->get(remotepath.get())) {
@@ -368,7 +370,7 @@ static int wdfs_readdir(
     struct readdir_ctx_t ctx = {
         buf,
         filler,
-        get_remotepath(localpath)
+        wdfs->get_remotepath(localpath)
     };
     
     ctx.oldfiles = cache->infolder(ctx.remotepath.get());
@@ -379,7 +381,7 @@ static int wdfs_readdir(
         session, ctx.remotepath.get(), NE_DEPTH_ONE,
         &prop_names[0], wdfs_readdir_propfind_callback, &ctx);
     /* handle the redirect and retry the propfind with the redirect target */
-    if (ret == NE_REDIRECT && wdfs.redirect == true) {
+    if (ret == NE_REDIRECT && wdfs_cfg.redirect == true) {
         if (handle_redirect(ctx.remotepath))
             return -ENOENT;
         ret = ne_simple_propfind(
@@ -416,7 +418,7 @@ static int wdfs_open(const char *localpath, struct fuse_file_info *fi)
 
     assert(localpath && fi);
 
-    auto remotepath = get_remotepath(localpath);
+    auto remotepath = wdfs->get_remotepath(localpath);
     if (!remotepath) return -ENOMEM;
     
     std::unique_ptr<fuse_file_t> file(new fuse_file_t());
@@ -460,8 +462,8 @@ static int wdfs_open(const char *localpath, struct fuse_file_info *fi)
         if (file->fd == -1) return -EIO;
         
         /* try to lock, if locking is enabled and file is not below svn_basedir. */
-        if (wdfs.locking_mode != NO_LOCK) {
-            if (lockfile(remotepath.get(), wdfs.locking_timeout)) {
+        if (wdfs_cfg.locking_mode != NO_LOCK) {
+            if (lockfile(remotepath.get(), wdfs_cfg.locking_timeout)) {
                 /* locking the file is not possible, because the file is locked by 
                 * somebody else. read-only access is allowed. */
                 if ((fi->flags & O_ACCMODE) == O_RDONLY) {
@@ -549,7 +551,7 @@ static int wdfs_release(const char *localpath, struct fuse_file_info *fi)
 
     fuse_file_t *file = reinterpret_cast<fuse_file_t*>(fi->fh);
 
-    auto remotepath(get_remotepath(localpath));
+    auto remotepath(wdfs->get_remotepath(localpath));
     if (!remotepath) return -ENOMEM;
 
     /* put the file only to the server, if it was modified. */
@@ -579,7 +581,7 @@ static int wdfs_release(const char *localpath, struct fuse_file_info *fi)
 
         /* unlock if locking is enabled and mode is ADVANCED_LOCK, because data
             * has been read and writen and so now it's time to remove the lock. */
-        if (wdfs.locking_mode == ADVANCED_LOCK) {
+        if (wdfs_cfg.locking_mode == ADVANCED_LOCK) {
             if (unlockfile(remotepath.get())) {
                 return -EACCES;
             }
@@ -587,7 +589,7 @@ static int wdfs_release(const char *localpath, struct fuse_file_info *fi)
     }
 
     /* if locking is enabled and mode is SIMPLE_LOCK, simple unlock on close() */
-    if (wdfs.locking_mode == SIMPLE_LOCK) {
+    if (wdfs_cfg.locking_mode == SIMPLE_LOCK) {
         if (unlockfile(remotepath.get())) {
             return -EACCES;
         }
@@ -622,7 +624,7 @@ static int wdfs_truncate(const char *localpath, off_t size)
         *  4. read from fh_out and put file to the server
         */
 
-    auto remotepath = get_remotepath(localpath);
+    auto remotepath = wdfs->get_remotepath(localpath);
     if (!remotepath) return -ENOMEM;
 
     if (auto cached_file = cache->get(remotepath.get())) {
@@ -699,7 +701,7 @@ static int wdfs_ftruncate(
     wdfs_dbg("%s(%s)\n", __func__, localpath); 
     assert(localpath && fi);
 
-    auto remotepath = get_remotepath(localpath);
+    auto remotepath = wdfs->get_remotepath(localpath);
     if (!remotepath) return -ENOMEM;
 
     fuse_file_t* file = reinterpret_cast<fuse_file_t*>(fi->fh);
@@ -732,7 +734,7 @@ static int wdfs_mknod(const char *localpath, mode_t mode, dev_t rdev)
     wdfs_dbg("%s(%s)\n", __func__, localpath); 
     assert(localpath);
 
-    auto remotepath = get_remotepath(localpath);
+    auto remotepath = wdfs->get_remotepath(localpath);
     if (!remotepath) return -ENOMEM;
 
     int fh = get_filehandle();
@@ -758,7 +760,7 @@ static int wdfs_mkdir(const char *localpath, mode_t mode)
     wdfs_dbg("%s(%s)\n", __func__, localpath); 
     assert(localpath);
 
-    auto remotepath = get_remotepath(localpath);
+    auto remotepath = wdfs->get_remotepath(localpath);
     if (!remotepath) return -ENOMEM;
 
     if (ne_mkcol(session, remotepath.get())) {
@@ -777,18 +779,18 @@ static int wdfs_unlink(const char *localpath)
     wdfs_dbg("%s(%s)\n", __func__, localpath); 
     assert(localpath);
 
-    auto remotepath = get_remotepath(localpath);
+    auto remotepath = wdfs->get_remotepath(localpath);
     if (!remotepath) return -ENOMEM;
 
     /* unlock the file, to be able to unlink it */
-    if (wdfs.locking_mode != NO_LOCK) {
+    if (wdfs_cfg.locking_mode != NO_LOCK) {
         if (unlockfile(remotepath.get())) {
             return -EACCES;
         }
     }
 
     int ret = ne_delete(session, remotepath.get());
-    if (ret == NE_REDIRECT && wdfs.redirect == true) {
+    if (ret == NE_REDIRECT && wdfs_cfg.redirect == true) {
         if (handle_redirect(remotepath))
             return -ENOENT;
         ret = ne_delete(session, remotepath.get());
@@ -816,19 +818,19 @@ static int wdfs_rename(const char *localpath_src, const char *localpath_dest)
     wdfs_dbg("%s(%s -> %s)\n", __func__, localpath_src, localpath_dest); 
     assert(localpath_src && localpath_dest);
 
-    auto remotepath_src  = get_remotepath(localpath_src);
-    auto remotepath_dest = get_remotepath(localpath_dest);
+    auto remotepath_src  = wdfs->get_remotepath(localpath_src);
+    auto remotepath_dest = wdfs->get_remotepath(localpath_dest);
     if (!remotepath_src || !remotepath_dest) return -ENOMEM;
 
     /* unlock the source file, before renaming */
-    if (wdfs.locking_mode != NO_LOCK) {
+    if (wdfs_cfg.locking_mode != NO_LOCK) {
         if (unlockfile(remotepath_src.get())) {
             return -EACCES;
         }
     }
 
     int ret = ne_move(session, 1, remotepath_src.get(), remotepath_dest.get());
-    if (ret == NE_REDIRECT && wdfs.redirect == true) {
+    if (ret == NE_REDIRECT && wdfs_cfg.redirect == true) {
         if (handle_redirect(remotepath_src))
             return -ENOENT;
         ret = ne_move(session, 1, remotepath_src.get(), remotepath_dest.get());
@@ -852,7 +854,7 @@ int wdfs_chmod(const char *localpath, mode_t mode)
     wdfs_dbg("%s(%s)\n", __func__, localpath);
     assert(localpath);
     
-    auto remotepath = get_remotepath(localpath);
+    auto remotepath = wdfs->get_remotepath(localpath);
     const std::string mode_str = std::to_string(mode);
     const std::string exec_str = (mode & S_IXUSR || mode & S_IXGRP || mode &S_IXOTH) ? "T" : "F";
     
@@ -926,10 +928,12 @@ static int wdfs_statfs(const char *localpath, struct statvfs *buf)
 {
     wdfs_dbg("%s()\n", __func__);
 
-    cache.reset(new cache_t(wdfs.cachedir, wdfs.webdav_remotebasedir));
+    cache.reset(new cache_t(wdfs_cfg.cachedir, wdfs_cfg.webdav_remotebasedir));
+    
+    wdfs.reset(new wdfs_controller_t(wdfs_cfg.webdav_remotebasedir));
 
     try {
-        std::ifstream stream((wdfs.cachedir + "cache").c_str());
+        std::ifstream stream((wdfs_cfg.cachedir + "cache").c_str());
         boost::archive::text_iarchive oa(stream);
         //oa >> *cache;
     }
@@ -950,7 +954,7 @@ static void wdfs_destroy(void*)
     wdfs_dbg("%s()\n", __func__);
 
     try {
-        std::ofstream stream((wdfs.cachedir + "cache").c_str());
+        std::ofstream stream((wdfs_cfg.cachedir + "cache").c_str());
         boost::archive::text_oarchive oa(stream);
         //oa << *cache;
         cache.reset();
@@ -1030,7 +1034,7 @@ static void print_help()
 "    -l                     same as -o locking=simple\n"
 "    -m locking_mode        same as -o locking=mode (only numerical modes)\n"
 "    -t seconds             same as -o locking_timeout=sec\n\n",
-    wdfs.program_name);
+    wdfs_cfg.program_name);
 }
 
 
@@ -1057,75 +1061,75 @@ int main(int argc, char *argv[])
     int status_program_exec = 1;
 
     struct fuse_args options = FUSE_ARGS_INIT(argc, argv);
-    wdfs.program_name = argv[0];
+    wdfs_cfg.program_name = argv[0];
 
-    if (fuse_opt_parse(&options, &wdfs, wdfs_opts, wdfs_opt_proc) == -1)
+    if (fuse_opt_parse(&options, &wdfs_cfg, wdfs_opts, wdfs_opt_proc) == -1)
         exit(1);
 
-    if (wdfs.cachedir1) {
-      wdfs.cachedir = wdfs.cachedir1;
-      wdfs.cachedir += "/";
-      mkdir_p(wdfs.cachedir);
-      char *real_path = realpath(wdfs.cachedir.c_str(), NULL);
-      wdfs.cachedir = real_path;
-      wdfs.cachedir += "/";
+    if (wdfs_cfg.cachedir1) {
+      wdfs_cfg.cachedir = wdfs_cfg.cachedir1;
+      wdfs_cfg.cachedir += "/";
+      mkdir_p(wdfs_cfg.cachedir);
+      char *real_path = realpath(wdfs_cfg.cachedir.c_str(), NULL);
+      wdfs_cfg.cachedir = real_path;
+      wdfs_cfg.cachedir += "/";
       // use real_path
       free(real_path);
     }
 
-    if (wdfs.webdav_resource.empty()) {
-        fprintf(stderr, "%s: missing webdav uri\n", wdfs.program_name);
+    if (wdfs_cfg.webdav_resource.empty()) {
+        fprintf(stderr, "%s: missing webdav uri\n", wdfs_cfg.program_name);
         exit(1);
     }
     
     std::shared_ptr<ne_uri> uri(new ne_uri, ne_uri_free);
-    if (ne_uri_parse(wdfs.webdav_resource.c_str(), uri.get())) {
+    if (ne_uri_parse(wdfs_cfg.webdav_resource.c_str(), uri.get())) {
         fprintf(stderr,
-            "## ne_uri_parse() error: invalid URI '%s'.\n", wdfs.webdav_resource.c_str());
+            "## ne_uri_parse() error: invalid URI '%s'.\n", wdfs_cfg.webdav_resource.c_str());
         exit(1);
     }
     
     if(char const* home = getenv("HOME")) {
         auto hasher = std::hash<std::string>();
-        if (wdfs.cachedir.empty()) wdfs.cachedir = std::string(home) + "/" + ".wdfs/" + std::to_string(hasher(uri->host)) + "/";
-        if (mkdir_p(wdfs.cachedir)) {
-            fprintf(stderr, "%s: can't create cache folder %s\n", wdfs.program_name, wdfs.cachedir.c_str());
+        if (wdfs_cfg.cachedir.empty()) wdfs_cfg.cachedir = std::string(home) + "/" + ".wdfs/" + std::to_string(hasher(uri->host)) + "/";
+        if (mkdir_p(wdfs_cfg.cachedir)) {
+            fprintf(stderr, "%s: can't create cache folder %s\n", wdfs_cfg.program_name, wdfs_cfg.cachedir.c_str());
             exit(1);
         }
         
         auto up = parse_netrc(std::string(home) + "/.netrc", uri->host);
-        if (wdfs.username.empty()) wdfs.username = up.first;
-        if (wdfs.password.empty()) wdfs.password = up.second;
+        if (wdfs_cfg.username.empty()) wdfs_cfg.username = up.first;
+        if (wdfs_cfg.password.empty()) wdfs_cfg.password = up.second;
     }
     else {
-        fprintf(stderr, "%s: can't obtain HOME variable\n", wdfs.program_name);
+        fprintf(stderr, "%s: can't obtain HOME variable\n", wdfs_cfg.program_name);
         exit(1);
     }
 
-    if (wdfs.locking_timeout < -1 || wdfs.locking_timeout == 0) {
+    if (wdfs_cfg.locking_timeout < -1 || wdfs_cfg.locking_timeout == 0) {
         fprintf(stderr, "## error: timeout must be bigger than 0 or -1!\n");
         exit(1);
     }
 
-    if (wdfs.debug == true) {
+    if (wdfs_cfg.debug == true) {
         fprintf(stderr, 
             "wdfs settings:\n  program_name: %s\n  webdav_resource: %s\n"
             "  accept_certificate: %s\n  username: %s\n  password: %s\n"
             "  redirect: %s\n  locking_mode: %i\n"
             "  locking_timeout: %i\n"
             "  cache folder: %s\n  mountpoint: %s\n",
-            wdfs.program_name,
-            !wdfs.webdav_resource.empty() ? wdfs.webdav_resource.c_str() : "NULL",
-            wdfs.accept_certificate == true ? "true" : "false",
-            !wdfs.username.empty() ? wdfs.username.c_str() : "NULL",
-            !wdfs.password.empty() ? "****" : "NULL",
-            wdfs.redirect == true ? "true" : "false",
-            wdfs.locking_mode, wdfs.locking_timeout,
-            wdfs.cachedir.c_str(), wdfs.mountpoint.c_str());
+            wdfs_cfg.program_name,
+            !wdfs_cfg.webdav_resource.empty() ? wdfs_cfg.webdav_resource.c_str() : "NULL",
+            wdfs_cfg.accept_certificate == true ? "true" : "false",
+            !wdfs_cfg.username.empty() ? wdfs_cfg.username.c_str() : "NULL",
+            !wdfs_cfg.password.empty() ? "****" : "NULL",
+            wdfs_cfg.redirect == true ? "true" : "false",
+            wdfs_cfg.locking_mode, wdfs_cfg.locking_timeout,
+            wdfs_cfg.cachedir.c_str(), wdfs_cfg.mountpoint.c_str());
     }
 
     /* set a nice name for /proc/mounts */
-    char *fsname = ne_concat("-ofsname=wdfs (", wdfs.webdav_resource.c_str(), ")", NULL);
+    char *fsname = ne_concat("-ofsname=wdfs (", wdfs_cfg.webdav_resource.c_str(), ")", NULL);
     fuse_opt_add_arg(&options, fsname);
     FREE(fsname);
 
@@ -1142,13 +1146,13 @@ int main(int argc, char *argv[])
         memset(argv[arg_number], 0, strlen(argv[arg_number]));
 
     /* set up webdav connection, exit on error */
-    if (setup_webdav_session(*uri, wdfs.username, wdfs.password)) {
+    if (setup_webdav_session(*uri, wdfs_cfg.username, wdfs_cfg.password)) {
         status_program_exec = 1;
         goto cleanup;
     }
 	 
     if (remotepath_basedir) {
-        wdfs.webdav_remotebasedir = remotepath_basedir;
+        wdfs_cfg.webdav_remotebasedir = remotepath_basedir;
     }
 
     /* finally call fuse */

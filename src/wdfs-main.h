@@ -60,7 +60,7 @@ struct wdfs_conf {
     char* cachedir1;
 };
 
-extern struct wdfs_conf wdfs;
+extern struct wdfs_conf wdfs_cfg;
 
 /* look at wdfs-main.c for comments on these extern variables */
 extern const char *project_name;
