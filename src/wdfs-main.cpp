@@ -254,21 +254,23 @@ static int wdfs_getattr(const char *localpath, struct stat *stat)
     auto remotepath(wdfs->get_remotepath(localpath));
     if (!remotepath) return -ENOMEM;
     
-    auto fullpath(wdfs->get_fullpath(localpath));
-    if (!fullpath) return -ENOMEM;
+    auto fullpath(wdfs->remove_server(remotepath.get()));
+    //if (!fullpath) return -ENOMEM;
     
     wdfs_dbg("localpath: [%s]\n", localpath);      
     wdfs_dbg("remotepath: [%s]\n", remotepath.get());
-    wdfs_dbg("fullpath: [%s]\n", fullpath.get());      
+    wdfs_dbg("fullpath: [%s]\n", fullpath.c_str());      
     
     if (auto cached_resource = cache->get(remotepath.get())) {
         *stat = cached_resource->stat();
     } 
     else {
         try {
-            const stats_t stats = webdav_getattrs(session, remotepath);
+            const stats_t stats = webdav_getattrs(session, remotepath, *wdfs);
             cache->update(stats);
-            *stat = cache->get(fullpath.get())->stat();
+            auto resource = cache->get(fullpath);
+            assert(resource.get());
+            *stat = resource->stat();
         }
         catch (const webdav_exception_t& e) {
             fprintf(stderr, "## Error in %s(): %s\n", __func__, e.what());
@@ -910,7 +912,7 @@ static int wdfs_statfs(const char *localpath, struct statvfs *buf)
 
 /* just say hello when fuse takes over control. */
 #if FUSE_VERSION >= 26
-    static void* wdfs_init(struct fuse_conn_info *conn)
+    static void* wdfs_(struct fuse_conn_info *conn)
 #else
     static void* wdfs_init()
 #endif
@@ -919,7 +921,7 @@ static int wdfs_statfs(const char *localpath, struct statvfs *buf)
 
     cache.reset(new cache_t(wdfs_cfg.cachedir, wdfs_cfg.webdav_remotebasedir));
     
-    wdfs.reset(new wdfs_controller_t(wdfs_cfg.webdav_remotebasedir, wdfs_cfg.webdav_remotepath));
+    wdfs.reset(new wdfs_controller_t(wdfs_cfg.webdav_server, wdfs_cfg.webdav_remotebasedir));
 
     try {
         std::ifstream stream((wdfs_cfg.cachedir + "cache").c_str());
@@ -1143,7 +1145,9 @@ int main(int argc, char *argv[])
     if (remotepath_basedir) {
         wdfs_cfg.webdav_remotebasedir = remotepath_basedir;
     }
-    wdfs_cfg.webdav_remotepath = uri->path;
+    wdfs_cfg.webdav_server = ne_uri_unparse(uri.get());
+    wdfs_cfg.webdav_server = wdfs_cfg.webdav_server.substr(wdfs_cfg.webdav_server.find(wdfs_cfg.webdav_remotebasedir));
+    std::cerr << "SRV:" << wdfs_cfg.webdav_server << std::endl;
 
     /* finally call fuse */
     status_program_exec = call_fuse_main(&options);

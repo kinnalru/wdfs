@@ -128,7 +128,10 @@ public:
                     remove(p.first);
                     add(p.first, new_item);
                 }
-            }  
+            }
+            else {
+                add(p.first, new_item);
+            }
             wdfs_dbg("  >> Handling finished[%s]\n", p.first.c_str());
         }
         wdfs_dbg("%s() EXIT\n", __func__);

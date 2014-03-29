@@ -576,6 +576,13 @@ int handle_redirect(std::shared_ptr<char>& remotepath)
 }
 
 
+struct getattrs_ctx_t {
+  getattrs_ctx_t(stats_t& s, const wdfs_controller_t& w) : stats(s), wdfs(w) {}
+  
+  stats_t& stats;
+  const wdfs_controller_t& wdfs;
+};
+
 /* this method is called by ne_simple_propfind() from wdfs_getattr() for a
  * specific file. it sets the file's attributes and and them to the cache. */
 static void webdav_getattrs_propfind_callback(
@@ -593,8 +600,10 @@ static void webdav_getattrs_propfind_callback(
 
     assert(remotepath);
     
-    stats_t& stats = *reinterpret_cast<stats_t*>(userdata);
-    struct stat& stat = stats[remotepath];
+    getattrs_ctx_t* ctx = reinterpret_cast<getattrs_ctx_t*>(userdata);
+    struct stat& stat = ctx->stats[ctx->wdfs.remove_server(remotepath)];
+    
+    wdfs_dbg("  >> %s -> %s\n", remotepath, ctx->wdfs.remove_server(remotepath).c_str());  
     
     set_stat(stat, results);
 
@@ -605,13 +614,14 @@ static void webdav_getattrs_propfind_callback(
     wdfs_dbg("%s EXIT\n", __func__);  
 }
 
-stats_t webdav_getattrs(ne_session* session, std::shared_ptr<char>& remotepath)
+stats_t webdav_getattrs(ne_session* session, std::shared_ptr<char>& remotepath, const wdfs_controller_t& wdfs)
 {
     stats_t stats;
+    getattrs_ctx_t ctx(stats, wdfs);
         
     int ret = ne_simple_propfind(
         session, remotepath.get(), NE_DEPTH_ZERO, &prop_names[0],
-        webdav_getattrs_propfind_callback, &stats);
+        webdav_getattrs_propfind_callback, &ctx);
     
     wdfs_dbg("%s 1\n", __func__);  
     

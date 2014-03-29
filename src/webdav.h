@@ -4,6 +4,7 @@
 #include <ne_request.h>
 
 #include "common.h"
+#include "wdfs_controller.h"
 
 extern ne_session *session;
 
@@ -76,7 +77,7 @@ int handle_redirect(std::shared_ptr< char >& remotepath);
 
 void set_stat(struct stat& stat, const ne_prop_result_set *results);
 
-stats_t webdav_getattrs(ne_session* session, std::shared_ptr<char>& remotepath);
+stats_t webdav_getattrs(ne_session* session, std::shared_ptr< char >& remotepath, const wdfs_controller_t& wdfs);
 
 
 
