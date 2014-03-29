@@ -52,6 +52,7 @@
 
 #include "wdfs-main.h"
 #include "webdav.h"
+#include "log.h"
 
 
 /* used to authorize at the webdav server */
@@ -601,9 +602,9 @@ static void webdav_getattrs_propfind_callback(
     assert(remotepath);
     
     getattrs_ctx_t* ctx = reinterpret_cast<getattrs_ctx_t*>(userdata);
-    struct stat& stat = ctx->stats[ctx->wdfs.remove_server(remotepath)];
+    struct stat& stat = ctx->stats[ctx->wdfs.remove_server(remotepath).get()];
     
-    wdfs_dbg("  >> %s -> %s\n", remotepath, ctx->wdfs.remove_server(remotepath).c_str());  
+    wdfs_dbg("  >> %s -> %s\n", remotepath, ctx->wdfs.remove_server(remotepath).get());  
     
     set_stat(stat, results);
 

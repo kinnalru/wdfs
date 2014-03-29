@@ -45,6 +45,7 @@
 #include "wdfs_controller.h"
 #include "webdav.h"
 #include "cache.h"
+#include "log.h"
 
 
 
@@ -248,37 +249,45 @@ std::string get_filename(const char* remotepath) {
  * request. */
 static int wdfs_getattr(const char *localpath, struct stat *stat)
 {
-    wdfs_dbg("%s(%s)\n", __func__, localpath);      
-    assert(localpath && stat);
-
-    auto remotepath(wdfs->get_remotepath(localpath));
-    if (!remotepath) return -ENOMEM;
-    
-    auto fullpath(wdfs->remove_server(remotepath.get()));
-    //if (!fullpath) return -ENOMEM;
-    
-    wdfs_dbg("localpath: [%s]\n", localpath);      
-    wdfs_dbg("remotepath: [%s]\n", remotepath.get());
-    wdfs_dbg("fullpath: [%s]\n", fullpath.c_str());      
-    
-    if (auto cached_resource = cache->get(remotepath.get())) {
-        *stat = cached_resource->stat();
-    } 
-    else {
-        try {
-            const stats_t stats = webdav_getattrs(session, remotepath, *wdfs);
-            cache->update(stats);
-            auto resource = cache->get(fullpath);
-            assert(resource.get());
+    LOG_ENEX(localpath, "");  
+    try {
+        auto remotepath(wdfs->remotepath(localpath));
+        if (!remotepath) return -ENOMEM;
+        
+        auto cachepath(wdfs->remove_server(remotepath.get()));
+        if (!cachepath) return -ENOMEM;
+        
+        wdfs_dbg("localpath: [%s]\n", localpath);
+        wdfs_dbg("remotepath: [%s]\n", remotepath.get());
+        wdfs_dbg("cachepath: [%s]\n", cachepath.get());      
+        
+        if (auto resource = cache->get(cachepath.get())) {
             *stat = resource->stat();
+        } 
+        else {
+            cache->update(webdav_getattrs(session, remotepath, *wdfs));
+            if (auto resource = cache->get(cachepath.get())) {
+                *stat = resource->stat();
+            }
+            else {
+                return -EFAULT;
+            }
         }
-        catch (const webdav_exception_t& e) {
-            fprintf(stderr, "## Error in %s(): %s\n", __func__, e.what());
-            return e.code();
-        }
+        
+        return 0;
     }
-    
-    return 0;
+    catch (const webdav_exception_t& e) {
+        wdfs_err("Error in %s: %s\n", __func__, e.what());
+        return e.code();
+    }
+    catch (const std::exception& e) {
+        wdfs_err("Error in %s: %s\n", __func__, e.what());
+        return -EFAULT;
+    }
+    catch (...) {
+        wdfs_err("Unknown error in %s\n", __func__);
+        return -EFAULT;
+    }
 }
 
 /* this method is called by ne_simple_propfind() from wdfs_readdir() for each 
@@ -361,7 +370,7 @@ static int wdfs_readdir(
     struct readdir_ctx_t ctx = {
         buf,
         filler,
-        wdfs->get_remotepath(localpath)
+        wdfs->remotepath(localpath)
     };
     
     ctx.oldfiles = cache->infolder(ctx.remotepath.get());
@@ -409,7 +418,7 @@ static int wdfs_open(const char *localpath, struct fuse_file_info *fi)
 
     assert(localpath && fi);
 
-    auto remotepath = wdfs->get_remotepath(localpath);
+    auto remotepath = wdfs->remotepath(localpath);
     if (!remotepath) return -ENOMEM;
     
     std::unique_ptr<fuse_file_t> file(new fuse_file_t());
@@ -542,7 +551,7 @@ static int wdfs_release(const char *localpath, struct fuse_file_info *fi)
 
     fuse_file_t *file = reinterpret_cast<fuse_file_t*>(fi->fh);
 
-    auto remotepath(wdfs->get_remotepath(localpath));
+    auto remotepath(wdfs->remotepath(localpath));
     if (!remotepath) return -ENOMEM;
 
     /* put the file only to the server, if it was modified. */
@@ -615,7 +624,7 @@ static int wdfs_truncate(const char *localpath, off_t size)
         *  4. read from fh_out and put file to the server
         */
 
-    auto remotepath = wdfs->get_remotepath(localpath);
+    auto remotepath = wdfs->remotepath(localpath);
     if (!remotepath) return -ENOMEM;
 
     if (auto cached_file = cache->get(remotepath.get())) {
@@ -692,7 +701,7 @@ static int wdfs_ftruncate(
     wdfs_dbg("%s(%s)\n", __func__, localpath); 
     assert(localpath && fi);
 
-    auto remotepath = wdfs->get_remotepath(localpath);
+    auto remotepath = wdfs->remotepath(localpath);
     if (!remotepath) return -ENOMEM;
 
     fuse_file_t* file = reinterpret_cast<fuse_file_t*>(fi->fh);
@@ -725,7 +734,7 @@ static int wdfs_mknod(const char *localpath, mode_t mode, dev_t rdev)
     wdfs_dbg("%s(%s)\n", __func__, localpath); 
     assert(localpath);
 
-    auto remotepath = wdfs->get_remotepath(localpath);
+    auto remotepath = wdfs->remotepath(localpath);
     if (!remotepath) return -ENOMEM;
 
     int fh = get_filehandle();
@@ -751,7 +760,7 @@ static int wdfs_mkdir(const char *localpath, mode_t mode)
     wdfs_dbg("%s(%s)\n", __func__, localpath); 
     assert(localpath);
 
-    auto remotepath = wdfs->get_remotepath(localpath);
+    auto remotepath = wdfs->remotepath(localpath);
     if (!remotepath) return -ENOMEM;
 
     if (ne_mkcol(session, remotepath.get())) {
@@ -770,7 +779,7 @@ static int wdfs_unlink(const char *localpath)
     wdfs_dbg("%s(%s)\n", __func__, localpath); 
     assert(localpath);
 
-    auto remotepath = wdfs->get_remotepath(localpath);
+    auto remotepath = wdfs->remotepath(localpath);
     if (!remotepath) return -ENOMEM;
 
     /* unlock the file, to be able to unlink it */
@@ -809,8 +818,8 @@ static int wdfs_rename(const char *localpath_src, const char *localpath_dest)
     wdfs_dbg("%s(%s -> %s)\n", __func__, localpath_src, localpath_dest); 
     assert(localpath_src && localpath_dest);
 
-    auto remotepath_src  = wdfs->get_remotepath(localpath_src);
-    auto remotepath_dest = wdfs->get_remotepath(localpath_dest);
+    auto remotepath_src  = wdfs->remotepath(localpath_src);
+    auto remotepath_dest = wdfs->remotepath(localpath_dest);
     if (!remotepath_src || !remotepath_dest) return -ENOMEM;
 
     /* unlock the source file, before renaming */
@@ -845,7 +854,7 @@ int wdfs_chmod(const char *localpath, mode_t mode)
     wdfs_dbg("%s(%s)\n", __func__, localpath);
     assert(localpath);
     
-    auto remotepath = wdfs->get_remotepath(localpath);
+    auto remotepath = wdfs->remotepath(localpath);
     const std::string mode_str = std::to_string(mode);
     const std::string exec_str = (mode & S_IXUSR || mode & S_IXGRP || mode &S_IXOTH) ? "T" : "F";
     

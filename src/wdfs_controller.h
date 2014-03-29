@@ -10,31 +10,14 @@
 
 struct wdfs_controller_t {
     
-    wdfs_controller_t(const std::string& srv, const std::string& rbd)
-        : server_(srv), rbd_(rbd)
-    {} 
+    wdfs_controller_t(const std::string& srv, const std::string& rbd);
 
     
     /// returns the escaped remotepath on success or empty pointer on error
-    string_p get_remotepath(const char *localpath) const
-    {
-        assert(localpath);
-        string_p remotepath(ne_concat(rbd_.c_str(), localpath, NULL), free);
-        return (remotepath) 
-            ? std::shared_ptr<char>(unify_path(remotepath.get(), ESCAPE | LEAVESLASH), free)
-            : std::shared_ptr<char>();
-    }
+    string_p remotepath(const char *localpath) const;
     
-    std::string remove_server(const std::string& remotepath) const
-    {
-        size_t pos = remotepath.find(server_);
-        if (pos != std::string::npos) {
-            return "/" + remotepath.substr(server_.size());
-        }
-        else {
-            return remotepath;
-        }
-    }
+    /// returns the escaped string without server info
+    string_p remove_server(std::string remotepath) const;
     
 private:
     const std::string server_;  

@@ -7,6 +7,7 @@
 #include <boost/foreach.hpp>
 
 #include "common.h"
+#include "log.h"
 
 typedef std::unique_ptr<struct stat> stat_p;
 
