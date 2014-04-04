@@ -13,9 +13,9 @@ struct scoped_logger {
     scoped_logger() : do_exit(false) {}
 
     ~scoped_logger() {
+        --detail::tab;        
         if (!do_exit) return;
 
-        --detail::tab;        
         std::cerr << get_tab() << "<< " << pretty.c_str() << ": " << exit << std::endl;
     }
 
@@ -41,7 +41,7 @@ private:
 
 
 #define LOG_ENTER(str) scoped_logger<int> __log_e; __log_e.set_pretty(__func__); __log_e.log_enter(str);
-#define LOG_EXIT(str) scoped_logger<decltype(str)> __log_x(str); __log_x.set_pretty(__func__);
+//#define LOG_EXIT(str) scoped_logger<decltype(str)> __log_x(str); __log_x.set_pretty(__func__);
 #define LOG_ENEX(str1, str2) scoped_logger<decltype(str2)> __log(str2); __log.set_pretty(__func__); __log.log_enter(str1);
 
 /*макрос для печати отладочной информации. Если приживется...*/

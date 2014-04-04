@@ -251,24 +251,35 @@ static int wdfs_getattr(const char *localpath, struct stat *stat)
 {
     LOG_ENEX(localpath, "");  
     try {
-        auto remotepath(wdfs->local2full(localpath));
-        if (!remotepath) return -ENOMEM;
-        
-        auto cachepath(wdfs->local2full(localpath));
-        if (!cachepath) return -ENOMEM;
+        auto fullpath(wdfs->local2full(localpath));
+        if (!fullpath) return -ENOMEM;
         
         wdfs_dbg("localpath: [%s]\n", localpath);
-        wdfs_dbg("remotepath: [%s]\n", remotepath.get());
-        wdfs_dbg("cachepath: [%s]\n", cachepath.get());
+        wdfs_dbg("fullpath: [%s]\n", fullpath.get());
         
-        if (auto resource = cache->get(cachepath.get())) {
+        if (auto resource = cache->get(fullpath.get())) {
             wdfs_dbg("cache hit: applying stat\n");
             *stat = resource->stat();
         } 
         else {
             wdfs_dbg("cache NOT hit: updating...\n");
-            cache->update(webdav_getattrs(session, remotepath, *wdfs));
-            if (auto resource = cache->get(cachepath.get())) {
+            auto oldfiles = cache->infolder(fullpath.get());
+            auto stats = webdav_getattrs(session, fullpath, *wdfs);
+            
+            oldfiles.erase(
+                std::remove_if(oldfiles.begin(), oldfiles.end(), [&stats] (const std::string& s) {
+                    return stats.find(s) != stats.end();
+                }),
+                oldfiles.end()
+            );
+            
+            BOOST_FOREACH(auto file, oldfiles) {
+                wdfs_dbg("removing unexistent file: [%s]\n", file.c_str());
+                cache->remove(file);
+            }
+            
+            cache->update(stats);
+            if (auto resource = cache->get(fullpath.get())) {
                 wdfs_dbg("cache updated: applying stat\n");
                 *stat = resource->stat();
             }
@@ -294,69 +305,6 @@ static int wdfs_getattr(const char *localpath, struct stat *stat)
     }
 }
 
-/* this method is called by ne_simple_propfind() from wdfs_readdir() for each 
- * member (file) of the requested collection. this method extracts the file's
- * attributes from the webdav response, adds it to the cache and calls the fuse
- * filler method to add the file to the requested directory. */
-static void wdfs_readdir_propfind_callback(
-#if NEON_VERSION >= 26
-    void *userdata, const ne_uri* href_uri, const ne_prop_result_set *results)
-#else
-    void *userdata, const char *remotepath0, const ne_prop_result_set *results)
-#endif
-{
-#if NEON_VERSION >= 26
-    string_p remotepath(ne_uri_unparse(href_uri), free);
-#else
-    string_p remotepath(strdup(remotepath0), free);
-#endif
-
-    LOG_ENEX(remotepath, "");  
-  
-    struct readdir_ctx_t *ctx = reinterpret_cast<readdir_ctx_t*>(userdata);
-    assert(ctx);
-
-    string_p remotepath1(unify_path(remotepath.get(), UNESCAPE), free);
-    string_p remotepath2(unify_path(ctx->remotepath.get(), UNESCAPE), free);
-    if (!remotepath1 || !remotepath2) {
-        wdfs_err("fatal error: unify_path() returned NULL\n");
-        return;
-    }
-
-    /* don't add this directory to itself */
-    if (strcmp(remotepath2.get(), remotepath1.get()) == 0) {
-        return;
-    }
-
-    const std::string filename = get_filename(remotepath1.get());
-
-    /* set this file's attributes. the "ne_prop_result_set *results" contains
-        * the file attributes of all files of this collection (directory). this 
-        * performs better then single requests for each file in getattr().  */
-
-    struct stat st;
-    set_stat(st, results);
-    cache_t::item_p new_file(new webdav_resource_t(st));
-    if (cache_t::item_p old_file = cache->get(remotepath.get())) {
-        if (new_file->differ(*old_file)) {
-            cache->remove(remotepath.get());
-            cache->update(remotepath.get(), new_file);
-        }
-    }
-
-    ctx->oldfiles.erase(
-        std::remove(ctx->oldfiles.begin(), ctx->oldfiles.end(), cache->normalize(remotepath.get())),
-        ctx->oldfiles.end()
-    );
-    
-    /* add directory entry */
-    st = new_file->stat();
-    if (ctx->filler(ctx->buf, filename.c_str(), &st, 0))
-        fprintf(stderr, "## filler() error in %s()!\n", __func__);
-
-}
-
-
 /* this method adds the files to the requested directory using the webdav method
  * propfind. the server responds with status code 207 that contains metadata of 
  * all files of the requested collection. for each file the method 
@@ -365,47 +313,60 @@ static int wdfs_readdir(
     const char *localpath, void *buf, fuse_fill_dir_t filler,
     off_t offset, struct fuse_file_info *fi)
 {
-    wdfs_dbg("%s(%s)\n", __func__, localpath);      
-    assert(localpath && filler);
+    assert(localpath && filler);    
+    LOG_ENEX(localpath, "");
 
-    struct readdir_ctx_t ctx = {
-        buf,
-        filler,
-        wdfs->remotepath(localpath)
-    };
-    
-    ctx.oldfiles = cache->infolder(ctx.remotepath.get());
+    try {
+        auto filldir = wdfs->local2full(localpath);
+        auto oldfiles = cache->infolder(filldir.get());
+        auto stats = webdav_readdir(session, filldir, *wdfs);
+        
+        oldfiles.erase(
+            std::remove_if(oldfiles.begin(), oldfiles.end(), [&stats] (const std::string& s) {
+                return stats.find(s) != stats.end();
+            }),
+            oldfiles.end()
+        );
+        
+        BOOST_FOREACH(auto file, oldfiles) {
+            wdfs_dbg("removing unexistent file: [%s]\n", file.c_str());
+            cache->remove(file);
+        }
 
-    if (!ctx.remotepath) return -ENOMEM;
+        cache->update(stats);    
+            
+        /* add directory entry */
+        BOOST_FOREACH(auto p, stats) {
+            auto filename = p.first;
+            if (p.second.st_mode & S_IFDIR)
+                filename.pop_back();
+            filename = get_filename(filename.c_str());
+            wdfs_dbg("fill file: [%s]\n", filename.c_str());
+            if (filler(buf, filename.c_str(), &p.second, 0))
+                wdfs_err("Can't fill fuse file: [%s]\n", filename.c_str());
+        }
 
-    int ret = ne_simple_propfind(
-        session, ctx.remotepath.get(), NE_DEPTH_ONE,
-        &prop_names[0], wdfs_readdir_propfind_callback, &ctx);
-    /* handle the redirect and retry the propfind with the redirect target */
-    if (ret == NE_REDIRECT && wdfs_cfg.redirect == true) {
-        if (handle_redirect(ctx.remotepath))
-            return -ENOENT;
-        ret = ne_simple_propfind(
-            session, ctx.remotepath.get(), NE_DEPTH_ONE,
-            &prop_names[0], wdfs_readdir_propfind_callback, &ctx);
+            
+        struct stat st;
+        memset(&st, 0, sizeof(st));
+        st.st_mode = S_IFDIR | 0777;
+        filler(buf, ".", &st, 0);
+        filler(buf, "..", &st, 0);
+
+        return 0;
     }
-    if (ret != NE_OK) {
-            fprintf(stderr, "## PROPFIND error in %s(): %s\n",
-                __func__, ne_get_error(session));
-        return -ENOENT;
+    catch (const webdav_exception_t& e) {
+        wdfs_err("Error in %s: %s\n", __func__, e.what());
+        return e.code();
     }
-
-    std::for_each(ctx.oldfiles.begin(), ctx.oldfiles.end(), [] (const std::string& s) {
-        cache->remove(s);
-    });
-    
-    struct stat st;
-    memset(&st, 0, sizeof(st));
-    st.st_mode = S_IFDIR | 0777;
-    filler(buf, ".", &st, 0);
-    filler(buf, "..", &st, 0);
-
-    return 0;
+    catch (const std::exception& e) {
+        wdfs_err("Error in %s: %s\n", __func__, e.what());
+        return -EFAULT;
+    }
+    catch (...) {
+        wdfs_err("Unknown error in %s\n", __func__);
+        return -EFAULT;
+    }    
 }
 
 

@@ -97,19 +97,36 @@ void free_chars(char **arg, ...)
     va_end(ap);
 }
 
-std::string canonicalize(const std::string& path)
+std::string canonicalize(const std::string& path, string_mode_e mode)
 {
     std::string result(path);
     boost::replace_all(result, "//", "/");
     boost::replace_all(result, "//", "/");
+    if (mode == ESCAPE) {
+        string_p tmp(ne_path_escape(result.c_str()), free);
+        result = tmp.get();
+    }
+    else if (mode == UNESCAPE) {
+        string_p tmp(ne_path_unescape(result.c_str()), free);
+        result = tmp.get();
+    }
+    
     return result;
 }
 
-string_p canonicalize(const string_p& path)
+string_p canonicalize(const string_p& path, string_mode_e mode)
 {
     std::string result(path.get());
     boost::replace_all(result, "//", "/");
     boost::replace_all(result, "//", "/");
+    if (mode == ESCAPE) {
+        string_p tmp(ne_path_escape(result.c_str()), free);
+        result = tmp.get();
+    }
+    else if (mode == UNESCAPE) {
+        string_p tmp(ne_path_unescape(result.c_str()), free);
+        result = tmp.get();
+    }    
     return mk_string(result);
 }
 

@@ -109,39 +109,39 @@ public:
     
     void add(const std::string& path_raw, item_p item) {
         const std::string path = normalize(path_raw);
-        wdfs_dbg("%s(%s) noramalized: [%s]\n", __func__, path_raw.c_str(), path.c_str());
+        LOG_ENTER(path_raw + " normalized: [" + path + "]");
         assert(cache_.find(path) == cache_.end());
         cache_[path] = item;
     }
     
     void update(const std::string& path_raw, item_p item) {
         const std::string path = normalize(path_raw);
+        LOG_ENTER(path_raw + " normalized: [" + path + "]");        
         cache_[path] = item;
     }    
 
     void update(const stats_t& stats) {
-        wdfs_dbg("%s()\n", __func__);
+        LOG_ENEX("", "");
         BOOST_FOREACH(auto p, stats) {
-            wdfs_dbg("  >> Handling [%s]\n", p.first.c_str());
+            wdfs_dbg("Handling [%s]\n", p.first.c_str());
             cache_t::item_p new_item(new webdav_resource_t(p.second));
             if (cache_t::item_p old_item = get(p.first)) {
-                wdfs_dbg("  >> 1\n");
                 if (new_item->differ(*old_item)) {
+                    wdfs_dbg("New item differs: removing [%s]\n", p.first.c_str());
                     remove(p.first);
                     add(p.first, new_item);
                 }
+                wdfs_dbg("Nothing to do\n");
             }
             else {
                 add(p.first, new_item);
             }
-            wdfs_dbg("  >> Handling finished[%s]\n", p.first.c_str());
         }
-        wdfs_dbg("%s() EXIT\n", __func__);
     }
     
     virtual item_p get(const std::string& path_raw) const {
         const std::string path = normalize(path_raw);
-        wdfs_dbg("%s(%s) noramalized: [%s]\n", __func__, path_raw.c_str(), path.c_str());
+        LOG_ENTER(path_raw + " normalized: [" + path + "]");
         data_t::const_iterator it = cache_.find(path);
         if (it != cache_.end()) {
             return it->second;
@@ -189,7 +189,7 @@ public:
     
     std::vector<std::string> infolder(const std::string& path_raw) {
         std::string path = normalize(path_raw);
-        
+        LOG_ENEX(path_raw + " normalized: [" + path + "]", "");
         std::string folder_suffix = (get(path_raw)->stat().st_mode || S_IFDIR) ? "/" : "";
         path += folder_suffix;
         

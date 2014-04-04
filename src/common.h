@@ -57,11 +57,12 @@ private:
 };
 
 /* used as mode for unify_path() */
-enum {
-    ESCAPE     = 0x0,
-    UNESCAPE   = 0x1,
+enum string_mode_e {
+    NONE       = 0,
+    ESCAPE     = 1 << 1,
+    UNESCAPE   = 1 << 2,
     /* do not remove trailing slashes */
-    LEAVESLASH = 0x2
+    LEAVESLASH = 1 << 3
 };
 
 /*
@@ -259,8 +260,8 @@ inline string_p mk_string(const string_p& string) {
     return string_p(strdup(string.get()), free);
 }
 
-std::string canonicalize(const std::string& path);
-string_p canonicalize(const string_p& path);
+std::string canonicalize(const std::string& path, string_mode_e mode = NONE);
+string_p canonicalize(const string_p& path, string_mode_e mode = NONE);
 
 int mkdir_p(const std::string& path);
 

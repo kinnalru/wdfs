@@ -40,7 +40,7 @@ string_p wdfs_controller_t::remote2full(const char* remotepath) const
 {
     std::string fullpath(remotepath);
     boost::replace_all(fullpath, server_, "");
-    return mk_string(canonicalize(fullpath));
+    return mk_string(canonicalize(fullpath, UNESCAPE));
 }
 
 
