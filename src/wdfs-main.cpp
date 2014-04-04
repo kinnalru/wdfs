@@ -302,31 +302,29 @@ static void wdfs_readdir_propfind_callback(
 #endif
 {
 #if NEON_VERSION >= 26
-    char *remotepath = ne_uri_unparse(href_uri);
+    string_p remotepath(ne_uri_unparse(href_uri), free);
 #else
-    char *remotepath = strdup(remotepath0);
+    string_p remotepath(strdup(remotepath0), free);
 #endif
 
-    wdfs_dbg("%s(%s)\n", __func__, remotepath);      
-
+    LOG_ENEX(remotepath, "");  
+  
     struct readdir_ctx_t *ctx = reinterpret_cast<readdir_ctx_t*>(userdata);
     assert(ctx);
 
-    char *remotepath1 = unify_path(remotepath, UNESCAPE);
-    char *remotepath2 = unify_path(ctx->remotepath.get(), UNESCAPE);
-    if (remotepath1 == NULL || remotepath2 == NULL) {
-        free_chars(&remotepath, &remotepath1, &remotepath2, NULL);
-        fprintf(stderr, "## fatal error: unify_path() returned NULL\n");
+    string_p remotepath1(unify_path(remotepath.get(), UNESCAPE), free);
+    string_p remotepath2(unify_path(ctx->remotepath.get(), UNESCAPE), free);
+    if (!remotepath1 || !remotepath2) {
+        wdfs_err("fatal error: unify_path() returned NULL\n");
         return;
     }
 
     /* don't add this directory to itself */
-    if (strcmp(remotepath2, remotepath1) == 0) {
-        free_chars(&remotepath, &remotepath1, &remotepath2, NULL);
+    if (strcmp(remotepath2.get(), remotepath1.get()) == 0) {
         return;
     }
 
-    const std::string filename = get_filename(remotepath1);
+    const std::string filename = get_filename(remotepath1.get());
 
     /* set this file's attributes. the "ne_prop_result_set *results" contains
         * the file attributes of all files of this collection (directory). this 
@@ -335,15 +333,15 @@ static void wdfs_readdir_propfind_callback(
     struct stat st;
     set_stat(st, results);
     cache_t::item_p new_file(new webdav_resource_t(st));
-    if (cache_t::item_p old_file = cache->get(remotepath)) {
+    if (cache_t::item_p old_file = cache->get(remotepath.get())) {
         if (new_file->differ(*old_file)) {
-            cache->remove(remotepath);
-            cache->update(remotepath, new_file);
+            cache->remove(remotepath.get());
+            cache->update(remotepath.get(), new_file);
         }
     }
 
     ctx->oldfiles.erase(
-        std::remove(ctx->oldfiles.begin(), ctx->oldfiles.end(), cache->normalize(remotepath)),
+        std::remove(ctx->oldfiles.begin(), ctx->oldfiles.end(), cache->normalize(remotepath.get())),
         ctx->oldfiles.end()
     );
     
@@ -352,7 +350,6 @@ static void wdfs_readdir_propfind_callback(
     if (ctx->filler(ctx->buf, filename.c_str(), &st, 0))
         fprintf(stderr, "## filler() error in %s()!\n", __func__);
 
-    free_chars(&remotepath, &remotepath1, &remotepath2, NULL);
 }
 
 

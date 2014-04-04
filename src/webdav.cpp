@@ -578,10 +578,10 @@ int handle_redirect(std::shared_ptr<char>& remotepath)
 
 
 struct getattrs_ctx_t {
-  getattrs_ctx_t(stats_t& s, const wdfs_controller_t& w) : stats(s), wdfs(w) {}
-  
-  stats_t& stats;
+  getattrs_ctx_t(const wdfs_controller_t& w) : wdfs(w) {}
+
   const wdfs_controller_t& wdfs;
+  stats_t stats;
 };
 
 /* this method is called by ne_simple_propfind() from wdfs_getattr() for a
@@ -593,32 +593,28 @@ static void webdav_getattrs_propfind_callback(
     void *userdata, const char *remotepath, const ne_prop_result_set *results)
 #endif
 {
+
 #if NEON_VERSION >= 26
-    char *remotepath = ne_uri_unparse(href_uri);
+    string_p remotepath(ne_uri_unparse(href_uri), free);
+#else
+    string_p remotepath(strdup(remotepath0), free);
 #endif
 
-    wdfs_dbg("%s(%s)\n", __func__, remotepath);  
+    wdfs_dbg("%s(%s)\n", __func__, remotepath.get());  
 
-    assert(remotepath);
-    
     getattrs_ctx_t* ctx = reinterpret_cast<getattrs_ctx_t*>(userdata);
-    struct stat& stat = ctx->stats[ctx->wdfs.remove_server(remotepath).get()];
+    struct stat& stat = ctx->stats[ctx->wdfs.remove_server(remotepath.get()).get()];
     
-    wdfs_dbg("  >> %s -> %s\n", remotepath, ctx->wdfs.remove_server(remotepath).get());  
+    wdfs_dbg("  >> %s -> %s\n", remotepath.get(), ctx->wdfs.remove_server(remotepath.get()).get());  
     
     set_stat(stat, results);
 
-#if NEON_VERSION >= 26
-    FREE(remotepath);
-#endif
-    
     wdfs_dbg("%s EXIT\n", __func__);  
 }
 
-stats_t webdav_getattrs(ne_session* session, std::shared_ptr<char>& remotepath, const wdfs_controller_t& wdfs)
+stats_t webdav_getattrs(ne_session* session, string_p& remotepath, const wdfs_controller_t& wdfs)
 {
-    stats_t stats;
-    getattrs_ctx_t ctx(stats, wdfs);
+    getattrs_ctx_t ctx(wdfs);
         
     int ret = ne_simple_propfind(
         session, remotepath.get(), NE_DEPTH_ZERO, &prop_names[0],
@@ -634,7 +630,7 @@ stats_t webdav_getattrs(ne_session* session, std::shared_ptr<char>& remotepath, 
         wdfs_dbg("%s 2\n", __func__);  
         ret = ne_simple_propfind(
             session, remotepath.get(), NE_DEPTH_ZERO, &prop_names[0],
-            webdav_getattrs_propfind_callback, &stats);
+            webdav_getattrs_propfind_callback, &ctx);
          wdfs_dbg("%s 3\n", __func__);  
     }
      wdfs_dbg("%s 4\n", __func__);  
@@ -642,7 +638,101 @@ stats_t webdav_getattrs(ne_session* session, std::shared_ptr<char>& remotepath, 
         throw webdav_exception_t(std::string("WEBDAV error in ") + __func__ + " :" + ne_get_error(session), -ENOENT);
     }
      wdfs_dbg("%s 5\n", __func__);  
-    return stats;
+    return ctx.stats;
+}
+
+
+struct readdir_ctx_t {
+  readdir_ctx_t(const wdfs_controller_t& w, const string_p& rp) : wdfs(w), remotepath(rp) {}
+
+  const wdfs_controller_t& wdfs;
+  const string_p& remotepath;
+  stats_t stats;
+};
+
+
+/* this method is called by ne_simple_propfind() from wdfs_readdir() for each 
+ * member (file) of the requested collection. this method extracts the file's
+ * attributes from the webdav response, adds it to the cache and calls the fuse
+ * filler method to add the file to the requested directory. */
+static void wdfs_readdir_propfind_callback(
+#if NEON_VERSION >= 26
+    void *userdata, const ne_uri* href_uri, const ne_prop_result_set *results)
+#else
+    void *userdata, const char *remotepath0, const ne_prop_result_set *results)
+#endif
+{
+#if NEON_VERSION >= 26
+    string_p remotepath(ne_uri_unparse(href_uri), free);
+#else
+    string_p remotepath(strdup(remotepath0), free);
+#endif
+
+    LOG_ENEX(remotepath, "");  
+  
+    struct readdir_ctx_t *ctx = reinterpret_cast<readdir_ctx_t*>(userdata);
+    assert(ctx);
+
+    string_p remotepath1(unify_path(remotepath.get(), UNESCAPE), free);
+    string_p remotepath2(unify_path(ctx->remotepath.get(), UNESCAPE), free);
+    if (!remotepath1 || !remotepath2) {
+        wdfs_err("fatal error: unify_path() returned NULL\n");
+        return;
+    }
+
+    /* don't add this directory to itself */
+    if (strcmp(remotepath2.get(), remotepath1.get()) == 0) {
+        return;
+    }
+
+    const std::string filename = get_filename(remotepath1.get());
+
+    /* set this file's attributes. the "ne_prop_result_set *results" contains
+        * the file attributes of all files of this collection (directory). this 
+        * performs better then single requests for each file in getattr().  */
+
+    struct stat st;
+    set_stat(st, results);
+    cache_t::item_p new_file(new webdav_resource_t(st));
+    if (cache_t::item_p old_file = cache->get(remotepath.get())) {
+        if (new_file->differ(*old_file)) {
+            cache->remove(remotepath.get());
+            cache->update(remotepath.get(), new_file);
+        }
+    }
+
+    ctx->oldfiles.erase(
+        std::remove(ctx->oldfiles.begin(), ctx->oldfiles.end(), cache->normalize(remotepath.get())),
+        ctx->oldfiles.end()
+    );
+    
+    /* add directory entry */
+    st = new_file->stat();
+    if (ctx->filler(ctx->buf, filename.c_str(), &st, 0))
+        fprintf(stderr, "## filler() error in %s()!\n", __func__);
+
+}
+
+stats_t webdav_readdir(ne_session* session, string_p& remotepath, const wdfs_controller_t& wdfs)
+{
+    readdir_ctx_t ctx(wdfs, remotepath);
+    
+    int ret = ne_simple_propfind(
+        session, ctx.remotepath.get(), NE_DEPTH_ONE,
+        &prop_names[0], wdfs_readdir_propfind_callback, &ctx);
+    /* handle the redirect and retry the propfind with the redirect target */
+    if (ret == NE_REDIRECT && wdfs_cfg.redirect == true) {
+        if (handle_redirect(ctx.remotepath))
+            return -ENOENT;
+        ret = ne_simple_propfind(
+            session, ctx.remotepath.get(), NE_DEPTH_ONE,
+            &prop_names[0], wdfs_readdir_propfind_callback, &ctx);
+    }
+    if (ret != NE_OK) {
+        fprintf(stderr, "## PROPFIND error in %s(): %s\n",
+            __func__, ne_get_error(session));
+    }
+       
 }
 
 
