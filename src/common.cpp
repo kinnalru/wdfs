@@ -7,6 +7,8 @@
 #include <fstream>
 #include <sstream>
 
+#include <boost/algorithm/string/replace.hpp>
+
 #include <glib.h>
 #include <ne_uri.h>
 
@@ -77,6 +79,7 @@ char* unify_path(const char* path_in, int mode)
     if (path_out == NULL)
         return NULL;
 
+    
     return path_out;
 }
 
@@ -93,6 +96,23 @@ void free_chars(char **arg, ...)
     }
     va_end(ap);
 }
+
+std::string canonicalize(const std::string& path)
+{
+    std::string result(path);
+    boost::replace_all(result, "//", "/");
+    boost::replace_all(result, "//", "/");
+    return result;
+}
+
+string_p canonicalize(const string_p& path)
+{
+    std::string result(path.get());
+    boost::replace_all(result, "//", "/");
+    boost::replace_all(result, "//", "/");
+    return mk_string(result);
+}
+
 
 int mkdir_p(const std::string& path)
 {

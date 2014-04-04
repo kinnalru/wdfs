@@ -25,6 +25,7 @@ add_definitions(-D_GNU_SOURCE -D_REENTRANT)
 
 set(HEADERS
 	cache.h
+	log.h
 	common.h
 	config.h
 	wdfs-main.h
@@ -34,6 +35,7 @@ set(HEADERS
 
 set(SOURCES
 	cache.cpp
+	log.cpp
 	webdav.cpp
 	wdfs-main.cpp
 	common.cpp

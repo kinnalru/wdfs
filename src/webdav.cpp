@@ -282,7 +282,8 @@ int setup_webdav_session(
 
 	/* save the remotepath, because each fuse callback method need it to 
 	 * access the files at the webdav server */
-	remotepath_basedir = remove_ending_slashes(uri.path);
+	//remotepath_basedir = remove_ending_slashes(uri.path);
+	remotepath_basedir = uri.path;
 	if (remotepath_basedir == NULL) {
 		ne_session_destroy(session);
 		return -1;
@@ -489,7 +490,7 @@ const char* get_helper(const ne_prop_result_set *results, field_e field) {
 
 void set_stat(struct stat& stat, const ne_prop_result_set* results)
 {
-    wdfs_dbg("%s()\n", __func__);
+    LOG_ENEX("", "");
 
     const char *resourcetype, *contentlength, *lastmodified, *creationdate, *executable, *modestr/*, *etagstr*/;
 
@@ -506,49 +507,43 @@ void set_stat(struct stat& stat, const ne_prop_result_set* results)
 
     int mode = 0;
 
-    wdfs_dbg("1\n");
-    
     /* webdav collection == directory entry */
     if (resourcetype != NULL && !strstr("<collection", resourcetype)) {
         /* "DT_DIR << 12" equals "S_IFDIR" */
         mode = (modestr) ? atoi(modestr) : 0777;
         mode |= S_IFDIR;
         stat.st_size = 4096;
+        wdfs_dbg("collection\n");
     } else {
         mode = (modestr) ? atoi(modestr) : 0666;
         mode |= S_IFREG;
         stat.st_size = (contentlength) ? atoll(contentlength) : 0;
+        wdfs_dbg("regular file\n");
     }
 
-    wdfs_dbg("2\n");
     stat.st_mode = mode;
 
     stat.st_nlink = 1;
     stat.st_atime = time(NULL);
 
-    wdfs_dbg("3\n");
     if (lastmodified != NULL)
         stat.st_mtime = ne_rfc1123_parse(lastmodified);
     else
         stat.st_mtime = 0;
 
-    wdfs_dbg("4\n");
     if (creationdate != NULL)
         stat.st_ctime = ne_iso8601_parse(creationdate);
     else
         stat.st_ctime = 0;
 
-    wdfs_dbg("5\n");
     /* calculate number of 512 byte blocks */
     stat.st_blocks  = (stat.st_size + 511) / 512;
 
-    wdfs_dbg("6\n");
     /* no need to set a restrict mode, because fuse filesystems can
         * only be accessed by the user that mounted the filesystem.  */
     stat.st_mode &= ~umask(0);
     stat.st_uid = getuid();
     stat.st_gid = getgid();
-    wdfs_dbg("7\n");
 }
 
 
@@ -600,44 +595,40 @@ static void webdav_getattrs_propfind_callback(
     string_p remotepath(strdup(remotepath0), free);
 #endif
 
-    wdfs_dbg("%s(%s)\n", __func__, remotepath.get());  
+    LOG_ENEX(remotepath.get(), "");
 
     getattrs_ctx_t* ctx = reinterpret_cast<getattrs_ctx_t*>(userdata);
-    struct stat& stat = ctx->stats[ctx->wdfs.remove_server(remotepath.get()).get()];
+    struct stat& stat = ctx->stats[ctx->wdfs.remote2full(remotepath.get()).get()];
     
-    wdfs_dbg("  >> %s -> %s\n", remotepath.get(), ctx->wdfs.remove_server(remotepath.get()).get());  
-    
-    set_stat(stat, results);
+    wdfs_dbg("%s -> %s\n", remotepath.get(), ctx->wdfs.remote2full(remotepath.get()).get());  
 
-    wdfs_dbg("%s EXIT\n", __func__);  
+    set_stat(stat, results);
 }
 
 stats_t webdav_getattrs(ne_session* session, string_p& remotepath, const wdfs_controller_t& wdfs)
 {
     getattrs_ctx_t ctx(wdfs);
-        
+
+    LOG_ENEX(remotepath.get(), "");  
+    
     int ret = ne_simple_propfind(
         session, remotepath.get(), NE_DEPTH_ZERO, &prop_names[0],
         webdav_getattrs_propfind_callback, &ctx);
-    
-    wdfs_dbg("%s 1\n", __func__);  
     
     /* handle the redirect and retry the propfind with the new target */
     if (ret == NE_REDIRECT && wdfs_cfg.redirect == true) {
         if (handle_redirect(remotepath))
             throw webdav_exception_t(std::string("WEBDAV error in ") + __func__, -ENOENT);
         
-        wdfs_dbg("%s 2\n", __func__);  
         ret = ne_simple_propfind(
             session, remotepath.get(), NE_DEPTH_ZERO, &prop_names[0],
             webdav_getattrs_propfind_callback, &ctx);
-         wdfs_dbg("%s 3\n", __func__);  
     }
-     wdfs_dbg("%s 4\n", __func__);  
+
     if (ret != NE_OK) {
         throw webdav_exception_t(std::string("WEBDAV error in ") + __func__ + " :" + ne_get_error(session), -ENOENT);
     }
-     wdfs_dbg("%s 5\n", __func__);  
+
     return ctx.stats;
 }
 
@@ -685,31 +676,32 @@ static void wdfs_readdir_propfind_callback(
         return;
     }
 
-    const std::string filename = get_filename(remotepath1.get());
+    const std::string filename = ctx->wdfs.remotepath(remotepath1.get()).get();
 
     /* set this file's attributes. the "ne_prop_result_set *results" contains
         * the file attributes of all files of this collection (directory). this 
         * performs better then single requests for each file in getattr().  */
 
-    struct stat st;
-    set_stat(st, results);
-    cache_t::item_p new_file(new webdav_resource_t(st));
-    if (cache_t::item_p old_file = cache->get(remotepath.get())) {
-        if (new_file->differ(*old_file)) {
-            cache->remove(remotepath.get());
-            cache->update(remotepath.get(), new_file);
-        }
-    }
-
-    ctx->oldfiles.erase(
-        std::remove(ctx->oldfiles.begin(), ctx->oldfiles.end(), cache->normalize(remotepath.get())),
-        ctx->oldfiles.end()
-    );
-    
-    /* add directory entry */
-    st = new_file->stat();
-    if (ctx->filler(ctx->buf, filename.c_str(), &st, 0))
-        fprintf(stderr, "## filler() error in %s()!\n", __func__);
+//TODO FIXME LAST
+//     struct stat st;
+//     set_stat(st, results);
+//     cache_t::item_p new_file(new webdav_resource_t(st));
+//     if (cache_t::item_p old_file = cache->get(remotepath.get())) {
+//         if (new_file->differ(*old_file)) {
+//             cache->remove(remotepath.get());
+//             cache->update(remotepath.get(), new_file);
+//         }
+//     }
+// 
+//     ctx->oldfiles.erase(
+//         std::remove(ctx->oldfiles.begin(), ctx->oldfiles.end(), cache->normalize(remotepath.get())),
+//         ctx->oldfiles.end()
+//     );
+//     
+//     /* add directory entry */
+//     st = new_file->stat();
+//     if (ctx->filler(ctx->buf, filename.c_str(), &st, 0))
+//         fprintf(stderr, "## filler() error in %s()!\n", __func__);
 
 }
 
@@ -721,17 +713,18 @@ stats_t webdav_readdir(ne_session* session, string_p& remotepath, const wdfs_con
         session, ctx.remotepath.get(), NE_DEPTH_ONE,
         &prop_names[0], wdfs_readdir_propfind_callback, &ctx);
     /* handle the redirect and retry the propfind with the redirect target */
-    if (ret == NE_REDIRECT && wdfs_cfg.redirect == true) {
-        if (handle_redirect(ctx.remotepath))
-            return -ENOENT;
-        ret = ne_simple_propfind(
-            session, ctx.remotepath.get(), NE_DEPTH_ONE,
-            &prop_names[0], wdfs_readdir_propfind_callback, &ctx);
-    }
-    if (ret != NE_OK) {
-        fprintf(stderr, "## PROPFIND error in %s(): %s\n",
-            __func__, ne_get_error(session));
-    }
+//TODO FIXME LAST    
+//     if (ret == NE_REDIRECT && wdfs_cfg.redirect == true) {
+//         if (handle_redirect(ctx.remotepath))
+//             return -ENOENT;
+//         ret = ne_simple_propfind(
+//             session, ctx.remotepath.get(), NE_DEPTH_ONE,
+//             &prop_names[0], wdfs_readdir_propfind_callback, &ctx);
+//     }
+//     if (ret != NE_OK) {
+//         fprintf(stderr, "## PROPFIND error in %s(): %s\n",
+//             __func__, ne_get_error(session));
+//     }
        
 }
 

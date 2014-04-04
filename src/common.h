@@ -251,6 +251,17 @@ char* unify_path(const char *path_in, int mode);
 /* free()s each char passed that is not NULL and sets it to NULL after freeing */
 void free_chars(char **arg, ...);
 
+inline string_p mk_string(const std::string& string) {
+    return string_p(strdup(string.c_str()), free);
+}
+
+inline string_p mk_string(const string_p& string) {
+    return string_p(strdup(string.get()), free);
+}
+
+std::string canonicalize(const std::string& path);
+string_p canonicalize(const string_p& path);
+
 int mkdir_p(const std::string& path);
 
 std::pair<std::string, std::string> parse_netrc(const std::string& file, const std::string& host);

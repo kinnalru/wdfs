@@ -81,8 +81,9 @@ public:
     {}
     
     std::string normalize(const std::string& path_raw) const {
-        std::shared_ptr<char> path(unify_path(path_raw.c_str(), UNESCAPE), free);
-        return std::string(path.get());
+        //std::shared_ptr<char> path(unify_path(path_raw.c_str(), UNESCAPE | LEAVESLASH), free);
+        //return std::string(path.get());
+        return canonicalize(path_raw);
     }
 
     std::string cache_filename(const std::string& path_raw) const {
@@ -142,13 +143,10 @@ public:
         const std::string path = normalize(path_raw);
         wdfs_dbg("%s(%s) noramalized: [%s]\n", __func__, path_raw.c_str(), path.c_str());
         data_t::const_iterator it = cache_.find(path);
-        wdfs_dbg("  >> 1\n");
         if (it != cache_.end()) {
-            wdfs_dbg("  >> 2\n");
             return it->second;
         }
         else {
-            wdfs_dbg("  >> 3\n");
             return item_p();
         }
     }

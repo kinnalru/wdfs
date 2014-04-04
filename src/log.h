@@ -3,13 +3,9 @@
 #include <iostream>
 #include <string>
 
-template <typename T>
 struct detail {
     static int tab;
 };
-
-template<typename T>
-int detail<T>::tab = 0;
 
 template <typename Exit = std::string>
 struct scoped_logger {
@@ -19,21 +15,21 @@ struct scoped_logger {
     ~scoped_logger() {
         if (!do_exit) return;
 
-        --detail<int>::tab;        
+        --detail::tab;        
         std::cerr << get_tab() << "<< " << pretty.c_str() << ": " << exit << std::endl;
     }
 
     template <typename Enter>
     void log_enter(const Enter& enter) {
         std::cerr << get_tab() << ">> " << pretty.c_str() << ": " << enter << std::endl;
-        ++detail<int>::tab;
+        ++detail::tab;
     }
     void log_enter() {log_enter("");}
 
     void set_pretty(const std::string& p ) {pretty = p;}
     
     static std::string get_tab() {
-        return std::string(detail<int>::tab * 4, ' ');
+        return std::string(detail::tab * 4, ' ');
     };
     
 private:
@@ -51,12 +47,12 @@ private:
 /*макрос для печати отладочной информации. Если приживется...*/
 #define wdfs_dbg(format, arg...) do { \
         if (wdfs_cfg.debug == true) \
-            fprintf(stderr, "%s>>  " format, scoped_logger<int>::get_tab().c_str(), ## arg);\
+            fprintf(stderr, "%s++ " format, scoped_logger<int>::get_tab().c_str(), ## arg);\
     } while (0)
     
 #define wdfs_err(format, arg...) do { \
         if (wdfs_cfg.debug == true) \
-            fprintf(stderr,"%s##  " format, scoped_logger<int>::get_tab().c_str(), ## arg);\
+            fprintf(stderr,"%s!! " format, scoped_logger<int>::get_tab().c_str(), ## arg);\
     } while (0)    
     
 #define wdfs_pr(format, arg...) do { \

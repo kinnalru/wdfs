@@ -251,25 +251,29 @@ static int wdfs_getattr(const char *localpath, struct stat *stat)
 {
     LOG_ENEX(localpath, "");  
     try {
-        auto remotepath(wdfs->remotepath(localpath));
+        auto remotepath(wdfs->local2full(localpath));
         if (!remotepath) return -ENOMEM;
         
-        auto cachepath(wdfs->remove_server(remotepath.get()));
+        auto cachepath(wdfs->local2full(localpath));
         if (!cachepath) return -ENOMEM;
         
         wdfs_dbg("localpath: [%s]\n", localpath);
         wdfs_dbg("remotepath: [%s]\n", remotepath.get());
-        wdfs_dbg("cachepath: [%s]\n", cachepath.get());      
+        wdfs_dbg("cachepath: [%s]\n", cachepath.get());
         
         if (auto resource = cache->get(cachepath.get())) {
+            wdfs_dbg("cache hit: applying stat\n");
             *stat = resource->stat();
         } 
         else {
+            wdfs_dbg("cache NOT hit: updating...\n");
             cache->update(webdav_getattrs(session, remotepath, *wdfs));
             if (auto resource = cache->get(cachepath.get())) {
+                wdfs_dbg("cache updated: applying stat\n");
                 *stat = resource->stat();
             }
             else {
+                wdfs_dbg("error\n");
                 return -EFAULT;
             }
         }
@@ -929,6 +933,9 @@ static int wdfs_statfs(const char *localpath, struct statvfs *buf)
     
     wdfs.reset(new wdfs_controller_t(wdfs_cfg.webdav_server, wdfs_cfg.webdav_remotebasedir));
 
+    std::cerr << "webdav server:" << wdfs_cfg.webdav_server << std::endl;
+    std::cerr << "webdav_remotebasedir:" << wdfs_cfg.webdav_remotebasedir << std::endl;
+    
     try {
         std::ifstream stream((wdfs_cfg.cachedir + "cache").c_str());
         boost::archive::text_iarchive oa(stream);
@@ -1151,8 +1158,9 @@ int main(int argc, char *argv[])
     if (remotepath_basedir) {
         wdfs_cfg.webdav_remotebasedir = remotepath_basedir;
     }
-    wdfs_cfg.webdav_server = ne_uri_unparse(uri.get());
-    wdfs_cfg.webdav_server = wdfs_cfg.webdav_server.substr(wdfs_cfg.webdav_server.find(wdfs_cfg.webdav_remotebasedir));
+//     wdfs_cfg.webdav_server = ne_uri_unparse(uri.get());
+    wdfs_cfg.webdav_server = std::string(uri->scheme) + "://" + uri->host;
+    //wdfs_cfg.webdav_server = wdfs_cfg.webdav_server.substr(0, wdfs_cfg.webdav_server.find(wdfs_cfg.webdav_remotebasedir));
     std::cerr << "SRV:" << wdfs_cfg.webdav_server << std::endl;
 
     /* finally call fuse */
