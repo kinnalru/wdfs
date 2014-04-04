@@ -546,6 +546,20 @@ void set_stat(struct stat& stat, const ne_prop_result_set* results)
     stat.st_gid = getgid();
 }
 
+inline void set_stat(struct stat& stat, ne_request* request) {
+    const char *lastmodified = ne_get_response_header(request, "Last-Modified");
+    if (!lastmodified) lastmodified = ne_get_response_header(request, "Date");
+
+    stat.st_mtime = (lastmodified)
+        ? ne_rfc1123_parse(lastmodified)
+        : 0;
+        
+    const char *contentlength = ne_get_response_header(request, "Content-Length");
+    
+    stat.st_size = (contentlength)
+        ? atoll(contentlength)
+        : 0;
+}
 
 int handle_redirect(std::shared_ptr<char>& remotepath)
 {
@@ -715,6 +729,26 @@ stats_t webdav_readdir(ne_session* session, string_p fulldir, const wdfs_control
     }
     
     return ctx.stats;
+}
+
+struct stat webdav_head(ne_session* session, string_p fullpath)
+{
+    LOG_ENEX(fullpath.get(), "");
+    std::shared_ptr<ne_request> request(
+        ne_request_create(session, "HEAD", fullpath.get()),
+        ne_request_destroy
+    );
+
+    int ret = ne_request_dispatch(request.get());
+
+    if (ret != NE_OK) {
+        throw webdav_exception_t(std::string("WEBDAV error in ") + __func__ + " :" + ne_get_error(session), -ENOENT);
+    }
+
+    struct stat st;
+    set_stat(st, request.get());
+
+    return st;
 }
 
 

@@ -92,7 +92,7 @@ public:
             return path;
         }
         else {
-            return folder_+ "/files/" + prefix_ + "/" + path;        
+            return folder_+ "/files/" + path;        
         }
     }
     
@@ -172,16 +172,16 @@ public:
         filename++;
         const std::string folder(path.c_str(), filename);
         
+        LOG_ENEX(path_raw + " normalized: [" + path + "]", "");
+        
         if (mkdir_p(folder)) {
-            fprintf(stderr, "## mkdir(%s) error\n", folder.c_str());      
-            return -1;
+            throw api_exception_t("mkdir() error for " + folder, errno);
         }
         int fd = open(path.c_str(), O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
-        if (fd == -1)
-            fprintf(stderr, "## open(%s) error\n", path.c_str());
-        
-        wdfs_dbg("%s(%s) cached file %s created\n", __func__, path_raw.c_str(), path.c_str());
-        
+        if (fd == -1) {
+            throw api_exception_t("open() error for " + path, errno);
+        }
+
         return fd;        
     }
 
@@ -215,7 +215,7 @@ public:
         const std::string path = normalize(path_raw);
         wdfs_dbg("%s(%s) normalized: [%s] cached filename: [%s]\n", __func__, path_raw.c_str(), path.c_str(), cache_filename(path_raw).c_str());
         cache_.erase(path);
-        ::remove(cache_filename(path_raw).c_str());
+        //::remove(cache_filename(path_raw).c_str());
     }
     
 private:

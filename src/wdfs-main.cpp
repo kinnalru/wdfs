@@ -333,13 +333,11 @@ static int wdfs_readdir(
             cache->remove(file);
         }
 
-        cache->update(stats);    
+        cache->update(stats);
             
         /* add directory entry */
         BOOST_FOREACH(auto p, stats) {
             auto filename = p.first;
-            if (p.second.st_mode & S_IFDIR)
-                filename.pop_back();
             filename = get_filename(filename.c_str());
             wdfs_dbg("fill file: [%s]\n", filename.c_str());
             if (filler(buf, filename.c_str(), &p.second, 0))
@@ -375,63 +373,61 @@ static int wdfs_readdir(
  * filehandle. also create a "struct open_file" to store the filehandle. */
 static int wdfs_open(const char *localpath, struct fuse_file_info *fi)
 {
-    wdfs_dbg("%s(%s)\n", __func__, localpath); 
-    wdfs_pr("   ++ by PID %d\n", fuse_get_context()->pid);
+    LOG_ENEX(localpath, "");
+    wdfs_pr("by PID %d\n", fuse_get_context()->pid);
 
     assert(localpath && fi);
 
-    auto remotepath = wdfs->remotepath(localpath);
-    if (!remotepath) return -ENOMEM;
+    auto fullpath = wdfs->local2full(localpath);
     
     std::unique_ptr<fuse_file_t> file(new fuse_file_t());
     
-    std::shared_ptr<webdav_resource_t> new_resource(new webdav_resource_t());
-    if (get_head(session, remotepath.get(), new_resource.get())) return -ENOENT;
+    stats_t stats;
+    stats[fullpath.get()] = webdav_head(session, fullpath);
 
-    if (auto old_resource = cache->get(remotepath.get())) {
-
-        if (new_resource->differ(*old_resource)) {
-            wdfs_pr("   -- new resource different - invalidate cache\n");
-            cache->remove(remotepath.get());
+    cache->update(stats);
+    if (auto resource = cache->get(fullpath.get())) {
+        wdfs_dbg("cache updated: opening file...\n");
+        file->fd = cache->create_file(fullpath.get());
+        
+        struct stat st;
+        if (::fstat(file->fd, &st)) {
+            wdfs_err("1. fstat error\n");
+            ::close(file->fd);
+            file->fd = -1;
+            cache->remove(fullpath.get());
+        }
+        else if(differ(st, resource->stat())) {
+            wdfs_err("2. cached file differ!\n");
+            ::close(file->fd);
+            file->fd = -1;
+            cache->remove(fullpath.get());
         }
         else {
-            wdfs_pr("   -- new resource is same - restoring from cache...\n");
-            
-            const std::string filename = cache->cache_filename(remotepath.get());
-            file->fd = ::open(filename.c_str(), O_RDWR);
-            if (file->fd != -1) {
-                struct stat st;
-                if (::fstat(file->fd, &st)) {
-                    ::close(file->fd);
-                    file->fd = -1;
-                    ::remove(filename.c_str());
-                } 
-                else if(differ(st, new_resource->stat())) {
-                    ::close(file->fd);
-                    file->fd = -1;
-                    ::remove(filename.c_str());
-                }
-            }
+            wdfs_err("2. cached file OK nothing to do!\n");
         }
     }
-
+    else {
+        wdfs_dbg("error\n");
+        return -EFAULT;
+    }
+    
     if (file->fd != -1) {
-        wdfs_pr("   ++ Filecache +hit+ no download needed\n");
+        wdfs_pr("filecache hit no download needed\n");
     }
     else {
-        wdfs_pr("   ++ Filecache +miss+ download file\n");
-        file->fd = cache->create_file(remotepath.get());
+        file->fd = cache->create_file(fullpath.get());
         if (file->fd == -1) return -EIO;
         
         /* try to lock, if locking is enabled and file is not below svn_basedir. */
         if (wdfs_cfg.locking_mode != NO_LOCK) {
-            if (lockfile(remotepath.get(), wdfs_cfg.locking_timeout)) {
+            if (lockfile(fullpath.get(), wdfs_cfg.locking_timeout)) {
                 /* locking the file is not possible, because the file is locked by 
                 * somebody else. read-only access is allowed. */
                 if ((fi->flags & O_ACCMODE) == O_RDONLY) {
                     fprintf(stderr,
                         "## error: file %s is already locked. "
-                        "allowing read-only (O_RDONLY) access!\n", remotepath.get());
+                        "allowing read-only (O_RDONLY) access!\n", fullpath.get());
                 } else {
                     return -EACCES;
                 }
@@ -444,16 +440,16 @@ static int wdfs_open(const char *localpath, struct fuse_file_info *fi)
         /* GET the data to the filehandle even if the file is opened O_WRONLY,
         * because the opening application could use pwrite() or use O_APPEND
         * and than the data needs to be present. */   
-        if (ne_get(session, remotepath.get(), file->fd)) {
+        std::string remotepath = canonicalize(fullpath.get(), ESCAPE);
+        wdfs_dbg("getting file: [%s]\n", remotepath.c_str());        
+        if (ne_get(session, remotepath.c_str(), file->fd)) {
             fprintf(stderr, "## GET error: %s\n", ne_get_error(session));
             return -ENOENT;        
         }
 
         wdfs_pr("   ++ File downloaded successfuly\n");
-        cache->update(remotepath.get(), new_resource);
     }
-
-
+    
     /* save our "struct open_file" to the fuse filehandle
         * this looks like a dirty hack too me, but it's the fuse way... */
     fi->fh = reinterpret_cast<uint64_t>(file.release());
