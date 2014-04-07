@@ -56,6 +56,27 @@ private:
     int errno_;
 };
 
+/* infos about an open file. used by open(), read(), write() and release()   */
+struct fuse_file_t {
+    fuse_file_t() : fd(-1), modified(false) {}
+    
+    fuse_file_t(const std::string& p, int f) : path(path), fd(f), modified(false) {
+        if (fd == -1) {
+            throw api_exception_t("Can't wrap file", errno);
+        }
+    }
+    
+    ~fuse_file_t() {
+        if (fd != -1) {
+            ::close(fd);
+        }
+    }
+    
+    const std::string path;
+    int fd;                 // this file's filehandle
+    bool modified;          // set true if the filehandle's content is modified 
+};
+
 /* used as mode for unify_path() */
 enum string_mode_e {
     NONE       = 0,

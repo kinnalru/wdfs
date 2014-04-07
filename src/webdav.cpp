@@ -751,16 +751,33 @@ struct stat webdav_head(ne_session* session, string_p fullpath)
     return st;
 }
 
-void webdav_get(ne_session* session, string_p fullpath, const std::string& cachedfile, int fd, const wdfs_controller_t& wdfs)
+std::unique_ptr<fuse_file_t> webdav_get(ne_session* session, string_p fullpath, const std::string& cachedfile)
 {
+    LOG_ENEX(fullpath.get(), "");
+    
+    std::vector<char> tmpfile(cachedfile.begin(), cachedfile.end());
+    tmpfile.push_back('.');
+    tmpfile.insert(tmpfile.end(), 6, 'X');
+    tmpfile.push_back('\0');
+    
+    wdfs_dbg("target file file %s\n", cachedfile.c_str());  
+    wdfs_dbg("temp file1 %s\n", tmpfile.data());  
+    wdfs_dbg("temp file2 %d\n", ::mkstemp(tmpfile.data()));
+    wdfs_dbg("temp file3 %s\n", tmpfile.data());  
+    
+    
+    std::unique_ptr<fuse_file_t> file(new fuse_file_t(tmpfile.data(), ::mkstemp(tmpfile.data())));
+    
     webdav_context_t ctx{session};  
     hook_helper_t hooker(session, &ctx);
+
+    wdfs_dbg("Getting file %s -> %s\n", fullpath.get(), file->path.c_str());  
     
     /* GET the data to the filehandle even if the file is opened O_WRONLY,
     * because the opening application could use pwrite() or use O_APPEND
     * and than the data needs to be present. */   
     std::string remotepath = canonicalize(fullpath.get(), ESCAPE);
-    if (ne_get(session, remotepath.c_str(), fd)) {
+    if (ne_get(session, remotepath.c_str(), file->fd)) {
         throw webdav_exception_t(std::string("GET error in ") + __func__ + ":" + ne_get_error(session), -ENOENT);
     }
 
@@ -771,6 +788,8 @@ void webdav_get(ne_session* session, string_p fullpath, const std::string& cache
     if (::utime(cachedfile.c_str(), &time)) {
         throw api_exception_t("utime() error for " + cachedfile, errno);
     }
+    
+    return file;
 }
 
 

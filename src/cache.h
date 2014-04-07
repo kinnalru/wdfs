@@ -166,7 +166,7 @@ public:
 //         }
 //     }
     
-    int create_file(const std::string& path_raw) const {
+    std::unique_ptr<fuse_file_t> create_file(const std::string& path_raw) const {
         const std::string path = cache_filename(path_raw);
         const char *filename = strrchr(path.c_str(), '/');
         filename++;
@@ -182,7 +182,7 @@ public:
             throw api_exception_t("open() error for " + path, errno);
         }
         
-        return fd;        
+        return std::unique_ptr<fuse_file_t>(new fuse_file_t(path, fd));
     }
 
 

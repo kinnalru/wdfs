@@ -210,15 +210,6 @@ struct readdir_ctx_t {
     std::vector<std::string> oldfiles;
 };
 
-/* infos about an open file. used by open(), read(), write() and release()   */
-struct fuse_file_t {
-    fuse_file_t() : fd(-1), modified(false) {}
-    
-    int fd;	        // this file's filehandle
-    bool modified;	// set true if the filehandle's content is modified 
-};
-
-
 /* returns a filehandle for read and write on success or -1 on error */
 static int get_filehandle()
 {
@@ -380,30 +371,27 @@ static int wdfs_open(const char *localpath, struct fuse_file_info *fi)
 
     auto fullpath = wdfs->local2full(localpath);
     
-    std::unique_ptr<fuse_file_t> file(new fuse_file_t());
+    std::unique_ptr<fuse_file_t> file;
     
     stats_t stats;
     stats[fullpath.get()] = webdav_head(session, fullpath);
-    int s = stats[fullpath.get()].st_mtime;
 
     cache->update(stats);
     if (auto resource = cache->get(fullpath.get())) {
         wdfs_dbg("cache updated: opening file...\n");
-        file->fd = cache->create_file(fullpath.get());
+        file = cache->create_file(fullpath.get());
         
         struct stat st;
         if (::fstat(file->fd, &st)) {
             wdfs_err("1. fstat error\n");
-            ::close(file->fd);
-            file->fd = -1;
+            file.reset();
             //cache->remove(fullpath.get());
         }
         else if(differ(st, resource->stat())) {
             wdfs_err("2. cached file differ!\n");
             wdfs_dbg("disk: %s\n ", to_string(st).c_str());
             wdfs_dbg("cache: %s\n ", to_string(resource->stat()).c_str());
-            ::close(file->fd);
-            file->fd = -1;
+            file.reset();
             //cache->remove(fullpath.get());
         }
         else {
@@ -415,13 +403,11 @@ static int wdfs_open(const char *localpath, struct fuse_file_info *fi)
         return -EFAULT;
     }
     
-    if (file->fd != -1) {
+    if (file) {
         wdfs_pr("filecache hit no download needed\n");
     }
     else {
-        file->fd = cache->create_file(fullpath.get());
-        if (file->fd == -1) return -EIO;
-        
+        file = cache->create_file(fullpath.get());
                 
         /* try to lock, if locking is enabled and file is not below svn_basedir. */
         if (wdfs_cfg.locking_mode != NO_LOCK) {
@@ -438,7 +424,12 @@ static int wdfs_open(const char *localpath, struct fuse_file_info *fi)
             }
         }
 
-        webdav_get(session, fullpath, cache->cache_filename(fullpath.get()), file->fd, *wdfs);
+        const std::string filename = cache->cache_filename(fullpath.get());
+        file = webdav_get(session, fullpath, filename);
+        wdfs_dbg("Renaming file %s -> %s\n", file->path.c_str(), filename.c_str());  
+        if (::rename(file->path.c_str(), filename.c_str())) {
+            throw api_exception_t("Can't rename file", errno);
+        }
         
         wdfs_pr("   ++ File downloaded successfuly\n");
     }
@@ -500,7 +491,8 @@ static int wdfs_release(const char *localpath, struct fuse_file_info *fi)
     wdfs_dbg("%s(%s)\n", __func__, localpath); 
     assert(localpath);
 
-    fuse_file_t *file = reinterpret_cast<fuse_file_t*>(fi->fh);
+    std::unique_ptr<fuse_file_t> file(reinterpret_cast<fuse_file_t*>(fi->fh));
+    fi->fh = 0;
 
     auto remotepath(wdfs->remotepath(localpath));
     if (!remotepath) return -ENOMEM;
@@ -546,10 +538,7 @@ static int wdfs_release(const char *localpath, struct fuse_file_info *fi)
         }
     }
 
-    /* close filehandle and free memory */
-    // close(file->fd);//TODO FIXME refference count
-    FREE(file);
-    fi->fh = 0;
+
 
     return 0;
 }
