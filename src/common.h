@@ -114,6 +114,10 @@ inline bool differ(const struct stat& s1, const struct stat s2) {
     return s1.st_mtime != s2.st_mtime || s1.st_size != s2.st_size;
 }
 
+inline std::string to_string(const struct stat& s1) {
+    return std::string("Stat: mtime:") + std::to_string(s1.st_mtime) + " size:" + std::to_string(s1.st_size);
+}
+
 #define wrap_stat_field(field, type, object) \
     type field() const {return object.st_##field;}; \
     bool has_##field() const {return object.st_##field != 0;}; \
@@ -238,6 +242,7 @@ std::unique_ptr<T> from_string(const std::string& strdata) {
 struct webdav_context_t {
     ne_session* session;
     
+    struct stat stat;
     webdav_resource_t resource;
 };
 

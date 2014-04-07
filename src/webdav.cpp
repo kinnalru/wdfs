@@ -450,10 +450,25 @@ void create_request_handler(ne_request *req, void *userdata, const char *method,
 
 }
 
+inline void set_stat(struct stat& stat, ne_request* request) {
+    const char *lastmodified = ne_get_response_header(request, "Last-Modified");
+    if (!lastmodified) lastmodified = ne_get_response_header(request, "Date");
+
+    stat.st_mtime = (lastmodified)
+        ? ne_rfc1123_parse(lastmodified)
+        : 0;
+        
+    const char *contentlength = ne_get_response_header(request, "Content-Length");
+    
+    stat.st_size = (contentlength)
+        ? atoll(contentlength)
+        : 0;
+}
+
 int post_send_handler(ne_request* request, void* userdata, const ne_status* status)
 {
     webdav_context_t* ctx = reinterpret_cast<webdav_context_t*>(userdata);
-    fill_resource(&ctx->resource, request);
+    set_stat(ctx->stat, request);
     return NE_OK;
 }
 
@@ -546,21 +561,6 @@ void set_stat(struct stat& stat, const ne_prop_result_set* results)
     stat.st_gid = getgid();
 }
 
-inline void set_stat(struct stat& stat, ne_request* request) {
-    const char *lastmodified = ne_get_response_header(request, "Last-Modified");
-    if (!lastmodified) lastmodified = ne_get_response_header(request, "Date");
-
-    stat.st_mtime = (lastmodified)
-        ? ne_rfc1123_parse(lastmodified)
-        : 0;
-        
-    const char *contentlength = ne_get_response_header(request, "Content-Length");
-    
-    stat.st_size = (contentlength)
-        ? atoll(contentlength)
-        : 0;
-}
-
 int handle_redirect(std::shared_ptr<char>& remotepath)
 {
     wdfs_dbg("%s(%s)\n", __func__, remotepath.get());
@@ -626,7 +626,7 @@ stats_t webdav_getattrs(ne_session* session, string_p remotepath, const wdfs_con
     LOG_ENEX(remotepath.get(), "");  
     
     int ret = ne_simple_propfind(
-        session, remotepath.get(), NE_DEPTH_ZERO, &prop_names[0],
+        session, canonicalize(remotepath.get(), ESCAPE).c_str(), NE_DEPTH_ZERO, &prop_names[0],
         webdav_getattrs_propfind_callback, &ctx);
     
     /* handle the redirect and retry the propfind with the new target */
@@ -735,7 +735,7 @@ struct stat webdav_head(ne_session* session, string_p fullpath)
 {
     LOG_ENEX(fullpath.get(), "");
     std::shared_ptr<ne_request> request(
-        ne_request_create(session, "HEAD", fullpath.get()),
+        ne_request_create(session, "HEAD", canonicalize(fullpath, ESCAPE).get()),
         ne_request_destroy
     );
 
@@ -749,6 +749,28 @@ struct stat webdav_head(ne_session* session, string_p fullpath)
     set_stat(st, request.get());
 
     return st;
+}
+
+void webdav_get(ne_session* session, string_p fullpath, const std::string& cachedfile, int fd, const wdfs_controller_t& wdfs)
+{
+    webdav_context_t ctx{session};  
+    hook_helper_t hooker(session, &ctx);
+    
+    /* GET the data to the filehandle even if the file is opened O_WRONLY,
+    * because the opening application could use pwrite() or use O_APPEND
+    * and than the data needs to be present. */   
+    std::string remotepath = canonicalize(fullpath.get(), ESCAPE);
+    if (ne_get(session, remotepath.c_str(), fd)) {
+        throw webdav_exception_t(std::string("GET error in ") + __func__ + ":" + ne_get_error(session), -ENOENT);
+    }
+
+    struct utimbuf time; 
+    time.actime = 0;
+    time.modtime = ctx.stat.st_mtime;
+    
+    if (::utime(cachedfile.c_str(), &time)) {
+        throw api_exception_t("utime() error for " + cachedfile, errno);
+    }
 }
 
 

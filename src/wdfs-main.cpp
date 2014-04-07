@@ -384,6 +384,7 @@ static int wdfs_open(const char *localpath, struct fuse_file_info *fi)
     
     stats_t stats;
     stats[fullpath.get()] = webdav_head(session, fullpath);
+    int s = stats[fullpath.get()].st_mtime;
 
     cache->update(stats);
     if (auto resource = cache->get(fullpath.get())) {
@@ -395,16 +396,18 @@ static int wdfs_open(const char *localpath, struct fuse_file_info *fi)
             wdfs_err("1. fstat error\n");
             ::close(file->fd);
             file->fd = -1;
-            cache->remove(fullpath.get());
+            //cache->remove(fullpath.get());
         }
         else if(differ(st, resource->stat())) {
             wdfs_err("2. cached file differ!\n");
+            wdfs_dbg("disk: %s\n ", to_string(st).c_str());
+            wdfs_dbg("cache: %s\n ", to_string(resource->stat()).c_str());
             ::close(file->fd);
             file->fd = -1;
-            cache->remove(fullpath.get());
+            //cache->remove(fullpath.get());
         }
         else {
-            wdfs_err("2. cached file OK nothing to do!\n");
+            wdfs_dbg("2. cached file OK nothing to do!\n");
         }
     }
     else {
@@ -419,6 +422,7 @@ static int wdfs_open(const char *localpath, struct fuse_file_info *fi)
         file->fd = cache->create_file(fullpath.get());
         if (file->fd == -1) return -EIO;
         
+                
         /* try to lock, if locking is enabled and file is not below svn_basedir. */
         if (wdfs_cfg.locking_mode != NO_LOCK) {
             if (lockfile(fullpath.get(), wdfs_cfg.locking_timeout)) {
@@ -434,19 +438,8 @@ static int wdfs_open(const char *localpath, struct fuse_file_info *fi)
             }
         }
 
-        webdav_context_t ctx{session};  
-        hook_helper_t hooker(session, &ctx);
+        webdav_get(session, fullpath, cache->cache_filename(fullpath.get()), file->fd, *wdfs);
         
-        /* GET the data to the filehandle even if the file is opened O_WRONLY,
-        * because the opening application could use pwrite() or use O_APPEND
-        * and than the data needs to be present. */   
-        std::string remotepath = canonicalize(fullpath.get(), ESCAPE);
-        wdfs_dbg("getting file: [%s]\n", remotepath.c_str());        
-        if (ne_get(session, remotepath.c_str(), file->fd)) {
-            fprintf(stderr, "## GET error: %s\n", ne_get_error(session));
-            return -ENOENT;        
-        }
-
         wdfs_pr("   ++ File downloaded successfuly\n");
     }
     
@@ -833,7 +826,7 @@ int wdfs_chmod(const char *localpath, mode_t mode)
     cache_t::item_p cached_file = cache->get(remotepath.get());
     assert(cached_file);
     
-    webdav_context_t ctx{session, *cached_file};  
+    webdav_context_t ctx{session, cached_file->stat(), *cached_file};  
     hook_helper_t hooker(session, &ctx);
     
     if (ne_proppatch(session, remotepath.get(), ops)) {

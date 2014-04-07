@@ -181,7 +181,7 @@ public:
         if (fd == -1) {
             throw api_exception_t("open() error for " + path, errno);
         }
-
+        
         return fd;        
     }
 

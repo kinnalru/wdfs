@@ -80,6 +80,7 @@ void set_stat(struct stat& stat, const ne_prop_result_set *results);
 stats_t webdav_getattrs(ne_session* session, string_p remotepath, const wdfs_controller_t& wdfs);
 stats_t webdav_readdir(ne_session* session, string_p fulldir, const wdfs_controller_t& wdfs);
 struct stat webdav_head(ne_session *session, string_p fullpath);
+void webdav_get(ne_session* session, string_p fullpath, const std::string& cachedfile, int fd, const wdfs_controller_t& wdfs);
 
 
 
