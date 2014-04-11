@@ -1077,6 +1077,9 @@ int main(int argc, char *argv[])
     }
 //     wdfs_cfg.webdav_server = ne_uri_unparse(uri.get());
     wdfs_cfg.webdav_server = std::string(uri->scheme) + "://" + uri->host;
+    if (uri->port) {
+       wdfs_cfg.webdav_server +=  ":" + std::to_string(uri->port);
+    }
     //wdfs_cfg.webdav_server = wdfs_cfg.webdav_server.substr(0, wdfs_cfg.webdav_server.find(wdfs_cfg.webdav_remotebasedir));
     std::cerr << "SRV:" << wdfs_cfg.webdav_server << std::endl;
 

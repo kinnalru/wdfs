@@ -111,7 +111,7 @@ std::string canonicalize(const std::string& path, string_mode_e mode)
         result = tmp.get();
     }
     
-    if (!result.empty() && *(--result.end()) == '/')
+    if (result.size() > 1 && *(--result.end()) == '/')
         result.pop_back();
     
     return result;
@@ -131,7 +131,7 @@ string_p canonicalize(const string_p& path, string_mode_e mode)
         result = tmp.get();
     }    
     
-    if (!result.empty() && *(--result.end()) == '/')
+    if (result.size() > 1 && *(--result.end()) == '/')
         result.pop_back();
     
     return mk_string(result);
