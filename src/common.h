@@ -60,7 +60,8 @@ private:
 struct fuse_file_t {
     fuse_file_t() : fd(-1), modified(false) {}
     
-    fuse_file_t(const std::string& p, int f) : path(path), fd(f), modified(false) {
+    fuse_file_t(const std::string& p, int f) : path(p), fd(f), modified(false) {
+        std::cerr << "fd: " << fd << " path:" << path << std::endl;
         if (fd == -1) {
             throw api_exception_t("Can't wrap file", errno);
         }

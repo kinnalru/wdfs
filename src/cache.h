@@ -128,6 +128,9 @@ public:
             if (cache_t::item_p old_item = get(p.first)) {
                 if (new_item->differ(*old_item)) {
                     wdfs_dbg("New item differs: removing [%s]\n", p.first.c_str());
+                    wdfs_dbg("old: %s\n ", to_string(old_item->stat()).c_str());
+                    wdfs_dbg("new: %s\n ", to_string(new_item->stat()).c_str());
+                    
                     remove(p.first);
                     add(p.first, new_item);
                 }

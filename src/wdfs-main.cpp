@@ -385,14 +385,12 @@ static int wdfs_open(const char *localpath, struct fuse_file_info *fi)
         if (::fstat(file->fd, &st)) {
             wdfs_err("1. fstat error\n");
             file.reset();
-            //cache->remove(fullpath.get());
         }
         else if(differ(st, resource->stat())) {
             wdfs_err("2. cached file differ!\n");
             wdfs_dbg("disk: %s\n ", to_string(st).c_str());
             wdfs_dbg("cache: %s\n ", to_string(resource->stat()).c_str());
             file.reset();
-            //cache->remove(fullpath.get());
         }
         else {
             wdfs_dbg("2. cached file OK nothing to do!\n");
@@ -494,38 +492,20 @@ static int wdfs_release(const char *localpath, struct fuse_file_info *fi)
     std::unique_ptr<fuse_file_t> file(reinterpret_cast<fuse_file_t*>(fi->fh));
     fi->fh = 0;
 
-    auto remotepath(wdfs->remotepath(localpath));
-    if (!remotepath) return -ENOMEM;
-
+    auto fullpath = wdfs->local2full(localpath);
+    
     /* put the file only to the server, if it was modified. */
     if (file->modified == true) {
         
         {
-            // Uploading file and updating cache to result values
-            auto cached_file = cache->get(remotepath.get());
-            
-            webdav_context_t ctx{session};  
-            hook_helper_t hooker(session, &ctx);
-            
-            if (ne_put(session, remotepath.get(), file->fd)) {
-                fprintf(stderr, "## PUT error: %s\n", ne_get_error(session));
-                return -EIO;
-            }
-            
-            //cached_file->resource.update_from(ctx.resource); //TODO FIXME LAST
-            cache->update(remotepath.get(), cached_file);
+            webdav_put(session, fullpath, file, *wdfs);
+            cache->remove(fullpath.get());
         }
         
-        wdfs_dbg("%s(): PUT the file to the server\n", __func__); 
-
-        /* attributes for this file are no longer up to date.
-            * so remove it from cache. */
-    //         file_cache.remove(remotepath);//TODO FIXME
-
         /* unlock if locking is enabled and mode is ADVANCED_LOCK, because data
             * has been read and writen and so now it's time to remove the lock. */
         if (wdfs_cfg.locking_mode == ADVANCED_LOCK) {
-            if (unlockfile(remotepath.get())) {
+            if (unlockfile(fullpath.get())) {
                 return -EACCES;
             }
         }
@@ -533,12 +513,10 @@ static int wdfs_release(const char *localpath, struct fuse_file_info *fi)
 
     /* if locking is enabled and mode is SIMPLE_LOCK, simple unlock on close() */
     if (wdfs_cfg.locking_mode == SIMPLE_LOCK) {
-        if (unlockfile(remotepath.get())) {
+        if (unlockfile(fullpath.get())) {
             return -EACCES;
         }
     }
-
-
 
     return 0;
 }
