@@ -73,6 +73,14 @@ struct fuse_file_t {
         }
     }
     
+    struct stat stat() const {
+        struct stat st;
+        if (::fstat(fd, &st)) {
+            throw api_exception_t("Can't stat file", errno);
+        }
+        return st;
+    }
+    
     void rename(const std::string& filename) {
         if (::rename(path.c_str(), filename.c_str())) {
             throw api_exception_t("Can't rename file", errno);

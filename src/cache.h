@@ -5,6 +5,7 @@
 #include <map>
 #include <memory>
 #include <boost/foreach.hpp>
+#include <boost/filesystem.hpp>
 
 #include "common.h"
 #include "log.h"
@@ -103,6 +104,15 @@ public:
         }
     }
     
+    std::string internal_filename(std::string fullpath) const {
+        std::cerr << "folder:" << folder_ << std::endl;
+        if (fullpath.find(folder_+ "/files/") != std::string::npos) {
+            fullpath = fullpath.substr((folder_+ "/files/").size());
+            return fullpath;
+        }
+        assert(!"cant make internal filename");
+    }
+    
     inline int size() const {return cache_.size();}
     
 //     stat_p stat(const std::string& path_raw) const {
@@ -195,7 +205,11 @@ public:
         return std::unique_ptr<fuse_file_t>(new fuse_file_t(path, fd));
     }
 
-    std::tuple<item_p, std::unique_ptr<fuse_file_t> > get_file(const std::string& path_raw) const {
+    std::unique_ptr<fuse_file_t> get_file(const std::string& path_raw) const {
+        return create_file(path_raw);
+    }
+    
+    std::tuple<item_p, std::unique_ptr<fuse_file_t> > get_resource_and_file(const std::string& path_raw) const {
         
         if (auto resource = get(path_raw)) {
             wdfs_dbg("cache updated: opening file...\n");
@@ -245,6 +259,35 @@ public:
           }
         );
         return files;
+    }
+    
+//     template <typename ToLocalFile>
+    std::vector<std::string> files_in_folder(const std::string& path_raw/*, const ToLocalFile& tlf*/) {
+        namespace fs = boost::filesystem;
+        
+        fs::path path(cache_filename(path_raw));
+        
+        std::vector<std::string> files;
+        if (fs::exists(path) && fs::is_directory(path))
+        {
+            fs::directory_iterator dend;
+            for (fs::directory_iterator dir(path) ; dir != dend ; ++dir)
+            {
+                files.push_back(internal_filename(dir->path().c_str()));
+            }
+        }
+        return files;
+        
+        //std::string path = normalize(path_raw);
+        //LOG_ENEX(path_raw + " normalized: [" + path + "]", "");
+        //std::string folder_suffix = (get_file(path_raw)->stat().st_mode || S_IFDIR) ? "/" : "";
+        //path += folder_suffix;
+        
+        //const char *filename = strrchr(path.c_str(), '/');
+        //filename++;
+        //const std::string folder(path.c_str(), filename);
+        //std::vector<std::string> files;
+        
     }
     
     virtual void remove(const std::string& path_raw) {

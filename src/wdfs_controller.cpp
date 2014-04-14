@@ -29,12 +29,6 @@ string_p wdfs_controller_t::local2full(const char* localpath) const
     return mk_string(canonicalize(rbd_ + localpath));
 }
 
-string_p wdfs_controller_t::full2local(const char* fullpath) const
-{
-    assert(fullpath);
-    string_p remote = remove_server(fullpath);
-    assert("!asdsdf");
-}
 
 string_p wdfs_controller_t::remote2full(const char* remotepath) const
 {

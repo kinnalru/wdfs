@@ -243,10 +243,41 @@ static int wdfs_getattr(const char *localpath, struct stat *stat)
     LOG_ENEX(localpath, "");  
     try {
         auto fullpath(wdfs->local2full(localpath));
-        if (!fullpath) return -ENOMEM;
         
         wdfs_dbg("localpath: [%s]\n", localpath);
         wdfs_dbg("fullpath: [%s]\n", fullpath.get());
+        
+        auto stats = webdav_getattrs(session, fullpath, *wdfs);
+        
+        namespace fs = boost::filesystem;
+        if (fs::exists(cache->cache_filename(fullpath.get())) && fs::is_regular_file(cache->cache_filename(fullpath.get())))
+        {
+            auto file = cache->get_file(fullpath.get());
+            if (differ(stats[fullpath.get()], file->stat())) {
+                //invalidate cache!
+                wdfs_err("Invalidating: cached file differ\n");
+                wdfs_dbg("Invalidating: remote: %s\n", to_string(stats[fullpath.get()]).c_str());
+                wdfs_dbg("Invalidating: local:  %s\n", to_string(file->stat()).c_str());
+                file.reset();
+            }
+            if (file) {
+                *stat = file->stat();
+                return 0;
+            }
+        }
+        else if (fs::exists(cache->cache_filename(fullpath.get())) && fs::is_directory(cache->cache_filename(fullpath.get()))) {
+            std::cerr << "111" << std::endl;
+            auto files = cache->files_in_folder(fullpath.get()/*, [&] (const std::string& full) {return wdfs->full2local(full.c_str());}*/);
+            BOOST_FOREACH(auto f, files) {
+                std::cerr << "File" << f << std::endl;
+            }
+            
+            BOOST_FOREACH(auto f, stats) {
+                std::cerr << "Remote File" << f.first << std::endl;
+            }
+            std::cerr << "222" << std::endl;
+        }
+        
         
         if (auto resource = cache->get(fullpath.get())) {
             wdfs_dbg("cache hit: applying stat\n");
@@ -377,7 +408,7 @@ static int wdfs_open(const char *localpath, struct fuse_file_info *fi)
     stats[fullpath.get()] = webdav_head(session, fullpath);
 
     cache->update(stats);
-    auto resource_and_file = cache->get_file(fullpath.get());
+    auto resource_and_file = cache->get_resource_and_file(fullpath.get());
     if (auto resource = std::get<0>(resource_and_file)) {
         file.reset(std::get<1>(resource_and_file).release());
     }
@@ -529,7 +560,7 @@ static int wdfs_truncate(const char *localpath, off_t size)
     stats[fullpath.get()] = webdav_head(session, fullpath);
     cache->update(stats);
 
-    auto resource_and_file = cache->get_file(fullpath.get());
+    auto resource_and_file = cache->get_resource_and_file(fullpath.get());
     if (auto resource = std::get<0>(resource_and_file)) {
         file.reset(std::get<1>(resource_and_file).release());
     }

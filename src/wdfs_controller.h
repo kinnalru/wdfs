@@ -20,7 +20,6 @@ struct wdfs_controller_t {
     string_p remove_server(std::string remotepath) const;
     
     string_p local2full(const char *localpath) const;
-    string_p full2local(const char *localpath) const;
     string_p remote2full(const char *localpath) const;
     
 private:
