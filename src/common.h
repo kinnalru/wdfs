@@ -73,6 +73,13 @@ struct fuse_file_t {
         }
     }
     
+    void rename(const std::string& filename) {
+        if (::rename(path.c_str(), filename.c_str())) {
+            throw api_exception_t("Can't rename file", errno);
+        }
+        const_cast<std::string&>(path) = filename;
+    }
+    
     const std::string path;
     int fd;                 // this file's filehandle
     bool modified;          // set true if the filehandle's content is modified 

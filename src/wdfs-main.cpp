@@ -377,24 +377,9 @@ static int wdfs_open(const char *localpath, struct fuse_file_info *fi)
     stats[fullpath.get()] = webdav_head(session, fullpath);
 
     cache->update(stats);
-    if (auto resource = cache->get(fullpath.get())) {
-        wdfs_dbg("cache updated: opening file...\n");
-        file = cache->create_file(fullpath.get());
-        
-        struct stat st;
-        if (::fstat(file->fd, &st)) {
-            wdfs_err("1. fstat error\n");
-            file.reset();
-        }
-        else if(differ(st, resource->stat())) {
-            wdfs_err("2. cached file differ!\n");
-            wdfs_dbg("disk: %s\n ", to_string(st).c_str());
-            wdfs_dbg("cache: %s\n ", to_string(resource->stat()).c_str());
-            file.reset();
-        }
-        else {
-            wdfs_dbg("2. cached file OK nothing to do!\n");
-        }
+    auto resource_and_file = cache->get_file(fullpath.get());
+    if (auto resource = std::get<0>(resource_and_file)) {
+        file.reset(std::get<1>(resource_and_file).release());
     }
     else {
         wdfs_dbg("error\n");
@@ -405,8 +390,6 @@ static int wdfs_open(const char *localpath, struct fuse_file_info *fi)
         wdfs_pr("filecache hit no download needed\n");
     }
     else {
-        file = cache->create_file(fullpath.get());
-                
         /* try to lock, if locking is enabled and file is not below svn_basedir. */
         if (wdfs_cfg.locking_mode != NO_LOCK) {
             if (lockfile(fullpath.get(), wdfs_cfg.locking_timeout)) {
@@ -425,10 +408,7 @@ static int wdfs_open(const char *localpath, struct fuse_file_info *fi)
         const std::string filename = cache->cache_filename(fullpath.get());
         file = webdav_get(session, fullpath, filename);
         wdfs_dbg("Renaming file %s -> %s\n", file->path.c_str(), filename.c_str());  
-        if (::rename(file->path.c_str(), filename.c_str())) {
-            throw api_exception_t("Can't rename file", errno);
-        }
-        
+        file->rename(filename);
         wdfs_pr("   ++ File downloaded successfuly\n");
     }
     
@@ -542,68 +522,46 @@ static int wdfs_truncate(const char *localpath, off_t size)
         *  4. read from fh_out and put file to the server
         */
 
-    auto remotepath = wdfs->remotepath(localpath);
-    if (!remotepath) return -ENOMEM;
+    auto fullpath = wdfs->local2full(localpath);
+    std::unique_ptr<fuse_file_t> file;    
+    
+    stats_t stats;
+    stats[fullpath.get()] = webdav_head(session, fullpath);
+    cache->update(stats);
 
-    if (auto cached_file = cache->get(remotepath.get())) {
-        //TODO FIXME LAST update on server?
-        if (::truncate(cache->cache_filename(remotepath.get()).c_str(), size)) {
-            fprintf(stderr, "## ftruncate() error: %d\n", 123123);            
-            ::remove(cache->cache_filename(remotepath.get()).c_str());
-        }
-
-        cached_file->stat().st_size = size;
-        /* calculate number of 512 byte blocks */
-        cached_file->stat().st_blocks = (cached_file->stat().st_size + 511) / 512;
-        cache->update(remotepath.get(), cached_file);
-        return 0;
+    auto resource_and_file = cache->get_file(fullpath.get());
+    if (auto resource = std::get<0>(resource_and_file)) {
+        file.reset(std::get<1>(resource_and_file).release());
+    }
+    else {
+        wdfs_dbg("error\n");
+        return -EFAULT;
     }
 
-    int ret;
-    int fh_in  = get_filehandle();
-    int fh_out = get_filehandle();
-    if (fh_in == -1 || fh_out == -1)
-        return -EIO;
-
-    char buffer[size];
-    memset(buffer, 0, size);
-
-    /* if truncate(0) is called, there is no need to get the data, because it
-    * would not be used. */
-    if (size != 0) {
-        if (ne_get(session, remotepath.get(), fh_in)) {
-            fprintf(stderr, "## GET error: %s\n", ne_get_error(session));
-            close(fh_in);
-            close(fh_out);
-            return -ENOENT;
+    if (file) {
+        if (::ftruncate(file->fd, size)) {
+            fprintf(stderr, "## ftruncate() error: %d\n", errno);
+            file.reset();
         }
-
-        ret = pread(fh_in, buffer, size, 0);
-        if (ret < 0) {
-            fprintf(stderr, "## pread() error: %d\n", ret);
-            close(fh_in);
-            close(fh_out);
+    }
+    else {
+        const std::string filename = cache->cache_filename(fullpath.get());
+        file = webdav_get(session, fullpath, filename);
+        wdfs_pr("   ++ File downloaded successfuly\n");        
+        if (::ftruncate(file->fd, size)) {
+            fprintf(stderr, "## ftruncate() error 2: %d\n", errno);
             return -EIO;
         }
+        
+        wdfs_dbg("Renaming file %s -> %s\n", file->path.c_str(), filename.c_str());  
+        file->rename(filename);
     }
 
-    ret = pwrite(fh_out, buffer, size, 0);
-    if (ret < 0) {
-        fprintf(stderr, "## pwrite() error: %d\n", ret);
-        close(fh_in);
-        close(fh_out);
-        return -EIO;
+    if (file)
+    {
+        webdav_put(session, fullpath, file, *wdfs);
+        cache->remove(fullpath.get());
     }
-
-    if (ne_put(session, remotepath.get(), fh_out)) {
-        fprintf(stderr, "## PUT error: %s\n", ne_get_error(session));
-        close(fh_in);
-        close(fh_out);
-        return -EIO;
-    }
-
-    close(fh_in);
-    close(fh_out);
 
     return 0;
 }

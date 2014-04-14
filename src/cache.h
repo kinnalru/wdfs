@@ -62,6 +62,13 @@ typedef std::unique_ptr<struct stat> stat_p;
 //     int fd_;
 // };
 
+/*! \brief Кеш
+ * Кеш основан на файловой системе.
+ * stat берется с файловой системы и обновляется на ней
+ * если есть расходжение - файл удаляется и загружается заново
+ * 
+ */
+
 class cache_t {
     friend class boost::serialization::access;
 
@@ -188,6 +195,32 @@ public:
         return std::unique_ptr<fuse_file_t>(new fuse_file_t(path, fd));
     }
 
+    std::tuple<item_p, std::unique_ptr<fuse_file_t> > get_file(const std::string& path_raw) const {
+        
+        if (auto resource = get(path_raw)) {
+            wdfs_dbg("cache updated: opening file...\n");
+            std::unique_ptr<fuse_file_t> file = create_file(path_raw);
+            
+            struct stat st;
+            if (::fstat(file->fd, &st)) {
+                wdfs_err("1. fstat error\n");
+                file.reset();
+            }
+            else if(differ(st, resource->stat())) {
+                wdfs_err("2. cached file differ!\n");
+                wdfs_dbg("disk: %s\n ", to_string(st).c_str());
+                wdfs_dbg("cache: %s\n ", to_string(resource->stat()).c_str());
+                file.reset();
+            }
+            else {
+                wdfs_dbg("2. cached file OK nothing to do!\n");
+            }
+            return std::make_tuple(resource, std::unique_ptr<fuse_file_t>(file.release()));
+        }
+        else {
+            return std::make_tuple(item_p(), std::unique_ptr<fuse_file_t>());
+        }
+    }
 
     
     std::vector<std::string> infolder(const std::string& path_raw) {
