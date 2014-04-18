@@ -6,6 +6,7 @@
 #include <memory>
 #include <boost/foreach.hpp>
 #include <boost/filesystem.hpp>
+#include <boost/concept_check.hpp>
 
 #include "common.h"
 #include "log.h"
@@ -296,6 +297,36 @@ public:
         cache_.erase(path);
         //::remove(cache_filename(path_raw).c_str());
     }
+    
+    
+    
+    
+    
+    bool fs_exists(const boost::filesystem::path& path) const {
+        return boost::filesystem::exists(path);
+    }
+    
+    bool fs_is_directory(const boost::filesystem::path& path) const {
+        return boost::filesystem::is_directory(path);
+    }
+    
+    bool fs_regular_file(const boost::filesystem::path& path) const {
+        return boost::filesystem::is_regular_file(path);
+    }
+    
+    bool fs_create_directory(const boost::filesystem::path& path) const {
+        return (fs_exists(path) && fs_is_directory(path)) || boost::filesystem::create_directory(path);
+    }
+    
+    std::unique_ptr<fuse_file_t> fs_create_file(const boost::filesystem::path& path) const {
+        int fd = ::open(path.c_str(), O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
+        if (fd == -1) {
+            throw api_exception_t("open() error for " + std::string(path.c_str()), errno);
+        }
+        
+        return std::unique_ptr<fuse_file_t>(new fuse_file_t(path.c_str(), fd));
+    }
+    
     
 private:
     std::string folder_;

@@ -148,7 +148,10 @@ private:
 };*/
 
 inline bool differ(const struct stat& s1, const struct stat s2) {
-    return s1.st_mtime != s2.st_mtime || s1.st_size != s2.st_size;
+    bool both_dir = (s1.st_mode & S_IFDIR && s2.st_mode & S_IFDIR);
+    bool both_reg = (s1.st_mode & S_IFREG && s2.st_mode & S_IFREG);
+    bool same_type = both_dir || both_reg;
+    return s1.st_mtime != s2.st_mtime || s1.st_size != s2.st_size || !same_type;
 }
 
 inline std::string to_string(const struct stat& s1) {

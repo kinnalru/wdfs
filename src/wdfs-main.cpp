@@ -234,23 +234,79 @@ std::string get_filename(const char* remotepath) {
 
 /* +++ fuse callback methods +++ */
 
+struct A {
+    int a;
+};
+
+struct B : A {
+    
+    void test() {
+        int b;
+    }
+};
+
+static_assert(std::is_pod<A>::value, "A must be a POD type.");
+static_assert(std::is_pod<B>::value, "B must be a POD type.");
 
 /* this method returns the file attributes (stat) for a requested file either
  * from the cache or directly from the webdav server by performing a propfind
  * request. */
 static int wdfs_getattr(const char *localpath, struct stat *stat)
 {
+    namespace fs = boost::filesystem;
+    
     LOG_ENEX(localpath, "");  
     try {
         auto fullpath(wdfs->local2full(localpath));
+        const std::string cachefile = cache->cache_filename(fullpath.get());
         
         wdfs_dbg("localpath: [%s]\n", localpath);
         wdfs_dbg("fullpath: [%s]\n", fullpath.get());
+        wdfs_dbg("cachefile: [%s]\n", cachefile.c_str());
         
         auto stats = webdav_getattrs(session, fullpath, *wdfs);
+
+        BOOST_FOREACH(auto f, stats) {
+            std::cerr << "Remote File" << f.first << std::endl;
+        }
         
-        namespace fs = boost::filesystem;
-        if (fs::exists(cache->cache_filename(fullpath.get())) && fs::is_regular_file(cache->cache_filename(fullpath.get())))
+        std::unique_ptr<fuse_file_t> file;
+        
+        if (!cache->fs_exists(cachefile))
+        {
+            wdfs_dbg("There is no cached file: %s\n", cachefile.c_str());
+            if (stats[fullpath.get()].st_mode & S_IFDIR)
+            {
+                wdfs_dbg("This is folder\n");
+                cache->fs_create_directory(cachefile);
+            }
+            else if (stats[fullpath.get()].st_mode & S_IFREG)
+            {
+                wdfs_dbg("This is regular file\n");
+                file = cache->fs_create_file(cachefile);
+            }
+        }
+        else
+        {
+            if (fs::is_regular_file(cachefile))
+            {
+                if (differ(stats[fullpath.get()], file->stat())) {
+                    //invalidate cache!
+                    wdfs_err("Invalidating: cached file differ\n");
+                    wdfs_dbg("Invalidating: remote: %s\n", to_string(stats[fullpath.get()]).c_str());
+                    wdfs_dbg("Invalidating: local:  %s\n", to_string(file->stat()).c_str());
+                    file.reset();
+                }
+            }
+        }
+        
+        if (file) {
+            *stat = file->stat();
+            return 0;
+        }
+
+        
+        if (fs::is_regular_file(cache->cache_filename(fullpath.get())))
         {
             auto file = cache->get_file(fullpath.get());
             if (differ(stats[fullpath.get()], file->stat())) {
@@ -272,9 +328,6 @@ static int wdfs_getattr(const char *localpath, struct stat *stat)
                 std::cerr << "File" << f << std::endl;
             }
             
-            BOOST_FOREACH(auto f, stats) {
-                std::cerr << "Remote File" << f.first << std::endl;
-            }
             std::cerr << "222" << std::endl;
         }
         
