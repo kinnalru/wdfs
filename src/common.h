@@ -19,7 +19,46 @@ typedef struct ne_session_s ne_session;
 typedef boost::optional<std::string> etag_t;
 typedef std::shared_ptr<char> string_p;
 
-typedef std::map<std::string, struct stat> stats_t;
+inline bool differ(const struct stat& s1, const struct stat s2) {
+    bool both_dir = (s1.st_mode & S_IFDIR && s2.st_mode & S_IFDIR);
+    bool both_reg = (s1.st_mode & S_IFREG && s2.st_mode & S_IFREG);
+    bool same_type = both_dir || both_reg;
+    return s1.st_mtime != s2.st_mtime || s1.st_size != s2.st_size || !same_type;
+}
+
+struct stat_t: public stat {
+    
+    
+    size_t size() const {
+        return this->st_size;
+    }
+
+    mode_t mode() const {
+        return this->st_mode & S_IFMT;
+    }
+    
+    mode_t permissions() const {
+        return (this->st_mode & S_IRWXU) | (this->st_mode & S_IRWXG) | (this->st_mode & S_IRWXO);
+    }
+    
+    bool is_directory() const {
+        return this->st_mode & S_IFDIR;
+    }
+    
+    bool is_regular_file() const {
+        return this->st_mode & S_IFREG;
+    }
+    
+    bool is_differ(const stat_t& st) const {
+        return mode() != st.mode() || this->st_mtime != st.st_mtime || this->st_size != st.st_size;
+    }
+    
+};
+
+static_assert(std::is_pod<struct stat>::value, "struct stat must be a POD type.");
+static_assert(std::is_pod<stat_t>::value, "struct stat_t must be a POD type.");
+
+typedef std::map<std::string, stat_t> stats_t;
 
 struct webdav_exception_t : public std::runtime_error
 {
@@ -147,14 +186,9 @@ private:
     struct stat stat_;
 };*/
 
-inline bool differ(const struct stat& s1, const struct stat s2) {
-    bool both_dir = (s1.st_mode & S_IFDIR && s2.st_mode & S_IFDIR);
-    bool both_reg = (s1.st_mode & S_IFREG && s2.st_mode & S_IFREG);
-    bool same_type = both_dir || both_reg;
-    return s1.st_mtime != s2.st_mtime || s1.st_size != s2.st_size || !same_type;
-}
 
-inline std::string to_string(const struct stat& s1) {
+
+inline std::string to_string(const stat_t& s1) {
     return std::string("Stat: mtime:") + std::to_string(s1.st_mtime) + " size:" + std::to_string(s1.st_size);
 }
 
@@ -247,6 +281,7 @@ public:
 
 template <typename T>
 inline std::string to_string(const T& rawdata) {
+    static_assert(std::is_pod<T>::value, "struct rawdata must be a POD type to dump.");
     const char* data = static_cast<const char*>(static_cast<const void*>(&rawdata));
     std::string strdata;
     std::for_each(data, data + sizeof(T), [&strdata] (char c) {
@@ -257,6 +292,7 @@ inline std::string to_string(const T& rawdata) {
 
 template <typename T>
 std::unique_ptr<T> from_string(const std::string& strdata) {
+    static_assert(std::is_pod<T>::value, "struct rawdata must be a POD type to load.");
     std::vector<char> data;
     size_t pos = 0;
     while (pos < strdata.size()) {

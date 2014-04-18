@@ -731,7 +731,7 @@ stats_t webdav_readdir(ne_session* session, string_p fulldir, const wdfs_control
     return ctx.stats;
 }
 
-struct stat webdav_head(ne_session* session, string_p fullpath)
+stat_t webdav_head(ne_session* session, string_p fullpath)
 {
     LOG_ENEX(fullpath.get(), "");
     std::shared_ptr<ne_request> request(
@@ -745,7 +745,7 @@ struct stat webdav_head(ne_session* session, string_p fullpath)
         throw webdav_exception_t(std::string("WEBDAV error in ") + __func__ + " :" + ne_get_error(session), -ENOENT);
     }
 
-    struct stat st;
+    stat_t st;
     set_stat(st, request.get());
 
     return st;

@@ -234,20 +234,6 @@ std::string get_filename(const char* remotepath) {
 
 /* +++ fuse callback methods +++ */
 
-struct A {
-    int a;
-};
-
-struct B : A {
-    
-    void test() {
-        int b;
-    }
-};
-
-static_assert(std::is_pod<A>::value, "A must be a POD type.");
-static_assert(std::is_pod<B>::value, "B must be a POD type.");
-
 /* this method returns the file attributes (stat) for a requested file either
  * from the cache or directly from the webdav server by performing a propfind
  * request. */
@@ -265,104 +251,61 @@ static int wdfs_getattr(const char *localpath, struct stat *stat)
         wdfs_dbg("cachefile: [%s]\n", cachefile.c_str());
         
         auto stats = webdav_getattrs(session, fullpath, *wdfs);
+        const auto entry = stats[fullpath.get()];
 
         BOOST_FOREACH(auto f, stats) {
             std::cerr << "Remote File" << f.first << std::endl;
         }
         
-        std::unique_ptr<fuse_file_t> file;
+        assert(stats.size() == 1);
         
-        if (!cache->fs_exists(cachefile))
-        {
-            wdfs_dbg("There is no cached file: %s\n", cachefile.c_str());
-            if (stats[fullpath.get()].st_mode & S_IFDIR)
-            {
-                wdfs_dbg("This is folder\n");
-                cache->fs_create_directory(cachefile);
+        if (cache->fs_exists(cachefile)) {
+            wdfs_dbg("File in cache: %s\n", cachefile.c_str());
+            const auto cached_entry = cache->fs_stat(cachefile);
+            if (cached_entry.mode() != entry.mode()) {
+                wdfs_dbg("Invalidating:  mode of cached file differ\n");
+                wdfs_dbg("========REMOVE==[%s]=======\n----------------------\n", cachefile.c_str());
+                cache->fs_remove(cachefile);
             }
-            else if (stats[fullpath.get()].st_mode & S_IFREG)
-            {
-                wdfs_dbg("This is regular file\n");
-                file = cache->fs_create_file(cachefile);
-            }
-        }
-        else
-        {
-            if (fs::is_regular_file(cachefile))
-            {
-                if (differ(stats[fullpath.get()], file->stat())) {
-                    //invalidate cache!
-                    wdfs_err("Invalidating: cached file differ\n");
-                    wdfs_dbg("Invalidating: remote: %s\n", to_string(stats[fullpath.get()]).c_str());
-                    wdfs_dbg("Invalidating: local:  %s\n", to_string(file->stat()).c_str());
-                    file.reset();
+            else if (cached_entry.is_differ(entry)) {
+                wdfs_err("Invalidating: cached file differ\n");
+                wdfs_dbg("Invalidating: remote: %s\n", to_string(entry).c_str());
+                wdfs_dbg("Invalidating: cached: %s\n", to_string(cached_entry).c_str());
+                if (entry.is_regular_file()) {
+                    wdfs_dbg("========REMOVE==[%s]=======\n----------------------\n", cachefile.c_str());
+                    cache->fs_remove(cachefile);
+                }
+                else if (entry.is_directory()) {
+                    wdfs_dbg("========Update DIrectory Stat==[%s]=======\n----------------------\n", cachefile.c_str());
+                    *stat = cache->fs_update_stat(cachefile, entry); 
+                    return 0;                    
                 }
             }
-        }
-        
-        if (file) {
-            *stat = file->stat();
-            return 0;
-        }
-
-        
-        if (fs::is_regular_file(cache->cache_filename(fullpath.get())))
-        {
-            auto file = cache->get_file(fullpath.get());
-            if (differ(stats[fullpath.get()], file->stat())) {
-                //invalidate cache!
-                wdfs_err("Invalidating: cached file differ\n");
-                wdfs_dbg("Invalidating: remote: %s\n", to_string(stats[fullpath.get()]).c_str());
-                wdfs_dbg("Invalidating: local:  %s\n", to_string(file->stat()).c_str());
-                file.reset();
-            }
-            if (file) {
-                *stat = file->stat();
+            else {
+                wdfs_dbg("cache hit: applying stat\n");
+                *stat = cached_entry;
                 return 0;
             }
         }
-        else if (fs::exists(cache->cache_filename(fullpath.get())) && fs::is_directory(cache->cache_filename(fullpath.get()))) {
-            std::cerr << "111" << std::endl;
-            auto files = cache->files_in_folder(fullpath.get()/*, [&] (const std::string& full) {return wdfs->full2local(full.c_str());}*/);
-            BOOST_FOREACH(auto f, files) {
-                std::cerr << "File" << f << std::endl;
-            }
-            
-            std::cerr << "222" << std::endl;
+        
+        //there is no cached file;
+        wdfs_dbg("There is no cached file: %s\n", cachefile.c_str());
+        if (entry.is_directory())
+        {
+            wdfs_dbg("This is folder: creating...\n");
+            cache->fs_create_directory(cachefile, entry);
+            *stat = cache->fs_stat(cachefile);
         }
-        
-        
-        if (auto resource = cache->get(fullpath.get())) {
-            wdfs_dbg("cache hit: applying stat\n");
-            *stat = resource->stat();
-        } 
+        else if (entry.is_regular_file())
+        {
+            wdfs_dbg("This is regular file: creating...\n");
+            cache->fs_create_file(cachefile, entry);
+            *stat = entry;
+        }
         else {
-            wdfs_dbg("cache NOT hit: updating...\n");
-            auto oldfiles = cache->infolder(fullpath.get());
-            auto stats = webdav_getattrs(session, fullpath, *wdfs);
-            
-            oldfiles.erase(
-                std::remove_if(oldfiles.begin(), oldfiles.end(), [&stats] (const std::string& s) {
-                    return stats.find(s) != stats.end();
-                }),
-                oldfiles.end()
-            );
-            
-            BOOST_FOREACH(auto file, oldfiles) {
-                wdfs_dbg("removing unexistent file: [%s]\n", file.c_str());
-                cache->remove(file);
-            }
-            
-            cache->update(stats);
-            if (auto resource = cache->get(fullpath.get())) {
-                wdfs_dbg("cache updated: applying stat\n");
-                *stat = resource->stat();
-            }
-            else {
-                wdfs_dbg("error\n");
-                return -EFAULT;
-            }
+            assert(!"unknown filetype");
         }
+
         
         return 0;
     }
@@ -392,9 +335,26 @@ static int wdfs_readdir(
     LOG_ENEX(localpath, "");
 
     try {
-        auto filldir = wdfs->local2full(localpath);
-        auto oldfiles = cache->infolder(filldir.get());
-        auto stats = webdav_readdir(session, filldir, *wdfs);
+        
+        auto fulldir(wdfs->local2full(localpath));
+        const std::string cachedir = cache->cache_filename(fulldir.get());
+        
+        wdfs_dbg("localpath: [%s]\n", localpath);
+        wdfs_dbg("fulldir: [%s]\n", fulldir.get());
+        wdfs_dbg("cachedir: [%s]\n", cachedir.c_str());
+        
+        auto oldfiles = cache->fs_ls(cachedir);
+        auto stats = webdav_readdir(session, fulldir, *wdfs);
+        
+        wdfs_dbg("Old files:\n");
+        BOOST_FOREACH(auto file, oldfiles) {
+            wdfs_dbg("%s\n", file.c_str());
+        }
+        
+        wdfs_dbg("New files:\n");
+        BOOST_FOREACH(auto file, stats) {
+            wdfs_dbg("%s\n", file.first.c_str());
+        }
         
         oldfiles.erase(
             std::remove_if(oldfiles.begin(), oldfiles.end(), [&stats] (const std::string& s) {
@@ -405,11 +365,10 @@ static int wdfs_readdir(
         
         BOOST_FOREACH(auto file, oldfiles) {
             wdfs_dbg("removing unexistent file: [%s]\n", file.c_str());
-            cache->remove(file);
+            //cache->remove(file);
         }
 
-        cache->update(stats);
-            
+        
         /* add directory entry */
         BOOST_FOREACH(auto p, stats) {
             auto filename = p.first;

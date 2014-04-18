@@ -79,7 +79,7 @@ void set_stat(struct stat& stat, const ne_prop_result_set *results);
 
 stats_t webdav_getattrs(ne_session* session, string_p remotepath, const wdfs_controller_t& wdfs);
 stats_t webdav_readdir(ne_session* session, string_p fulldir, const wdfs_controller_t& wdfs);
-struct stat webdav_head(ne_session *session, string_p fullpath);
+stat_t webdav_head(ne_session *session, string_p fullpath);
 
 std::unique_ptr<fuse_file_t> webdav_get(ne_session* session, string_p fullpath, const std::string& cachedfile);
 void webdav_put(ne_session* session, string_p fullpath, const std::unique_ptr<fuse_file_t>& file, const wdfs_controller_t& wdfs);

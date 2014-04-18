@@ -1,6 +1,8 @@
 #ifndef CACHE_H_
 #define CACHE_H_
 
+#include <sys/xattr.h>
+
 #include <string>
 #include <map>
 #include <memory>
@@ -63,6 +65,9 @@ typedef std::unique_ptr<struct stat> stat_p;
 //     webdav_resource_t resource_;
 //     int fd_;
 // };
+
+
+
 
 /*! \brief Кеш
  * Кеш основан на файловой системе.
@@ -262,20 +267,100 @@ public:
         return files;
     }
     
-//     template <typename ToLocalFile>
-    std::vector<std::string> files_in_folder(const std::string& path_raw/*, const ToLocalFile& tlf*/) {
-        namespace fs = boost::filesystem;
+    virtual void remove(const std::string& path_raw) {
+        const std::string path = normalize(path_raw);
+        wdfs_dbg("%s(%s) normalized: [%s] cached filename: [%s]\n", __func__, path_raw.c_str(), path.c_str(), cache_filename(path_raw).c_str());
+        cache_.erase(path);
+        //::remove(cache_filename(path_raw).c_str());
+    }
+    
+    
+    
+    
+    stat_t fs_stat(const boost::filesystem::path& path) const {
+        stat_t st;
+        if (::stat(path.c_str(), &st)) {
+            throw api_exception_t("Can't stat file", errno);
+        }
+        return st;
+    }
+    
+    bool fs_exists(const boost::filesystem::path& path) const {
+        return boost::filesystem::exists(path);
+    }
+    
+    bool fs_is_directory(const boost::filesystem::path& path) const {
+        return boost::filesystem::is_directory(path);
+    }
+    
+    bool fs_is_regular_file(const boost::filesystem::path& path) const {
+        return boost::filesystem::is_regular_file(path);
+    }
+    
+    stat_t fs_update_stat(const boost::filesystem::path& path, const stat_t& st) const {
+        stat_t self;
+        if (::stat(path.c_str(), &self)) {
+            throw api_exception_t(std::string("Can't stat updated path ") + path.c_str(), errno);
+        }
         
-        fs::path path(cache_filename(path_raw));
+        const auto cached_size = st.size();
+        if (setxattr(path.c_str(), "cache_size", &cached_size, sizeof(decltype(cached_size)), XATTR_REPLACE)) {
+            throw api_exception_t(std::string("Can't setxattr updated path ") + path.c_str(), errno);
+        }
         
+        if (::chmod(path.c_str(), (self.st_mode & S_ISUID) | (self.st_mode & S_ISGID) | st.permissions())) {
+            throw api_exception_t(std::string("Can't chmod updated path ") + path.c_str(), errno);
+        }
+        
+        struct utimbuf time; 
+        time.actime = 0;
+        time.modtime = st.st_mtime;
+
+        if (::utime(path.c_str(), &time)) {
+            throw api_exception_t(std::string("utime() error for ") + path.c_str(), errno);
+        }
+        if (::stat(path.c_str(), &self)) {
+            throw api_exception_t(std::string("Can't stat updated path ") + path.c_str(), errno);
+        }
+        return self;
+    }
+    
+    bool fs_create_directory(const boost::filesystem::path& path) const {
+        return (fs_exists(path) && fs_is_directory(path)) || boost::filesystem::create_directory(path);
+    }
+    
+    bool fs_create_directory(const boost::filesystem::path& path, const stat_t& st) const {
+        if ((fs_exists(path) && fs_is_directory(path)) || boost::filesystem::create_directory(path)) {
+            fs_update_stat(path, st);
+            return true;
+        }
+        else {
+            return false;
+        }
+    }    
+    
+    std::unique_ptr<fuse_file_t> fs_create_file(const boost::filesystem::path& path, mode_t mode = S_IRUSR | S_IWUSR) const {
+        int fd = ::open(path.c_str(), O_RDWR | O_CREAT | O_EXCL, mode);
+        if (fd == -1) {
+            throw api_exception_t("open() error for " + std::string(path.c_str()), errno);
+        }
+        
+        return std::unique_ptr<fuse_file_t>(new fuse_file_t(path.c_str(), fd));
+    }
+    
+    std::unique_ptr<fuse_file_t> fs_create_file(const boost::filesystem::path& path, const stat_t& st) const {
+        auto file = fs_create_file(path, st.permissions());
+        fs_update_stat(path, st);
+        return file;
+    }
+
+    //     template <typename ToLocalFile>
+    std::vector<std::string> fs_ls(const boost::filesystem::path& path) {
         std::vector<std::string> files;
-        if (fs::exists(path) && fs::is_directory(path))
+        boost::filesystem::directory_iterator dend;
+        for (boost::filesystem::directory_iterator dir(path) ; dir != dend ; ++dir)
         {
-            fs::directory_iterator dend;
-            for (fs::directory_iterator dir(path) ; dir != dend ; ++dir)
-            {
-                files.push_back(internal_filename(dir->path().c_str()));
-            }
+            files.push_back(internal_filename(dir->path().c_str()));
         }
         return files;
         
@@ -291,41 +376,12 @@ public:
         
     }
     
-    virtual void remove(const std::string& path_raw) {
-        const std::string path = normalize(path_raw);
-        wdfs_dbg("%s(%s) normalized: [%s] cached filename: [%s]\n", __func__, path_raw.c_str(), path.c_str(), cache_filename(path_raw).c_str());
-        cache_.erase(path);
-        //::remove(cache_filename(path_raw).c_str());
+    void fs_remove(const boost::filesystem::path& path) {
+        if (path.string().size() <= 10)
+            throw std::runtime_error("PROTECT: decline to remove file at shor path: " + path.string());
+        boost::filesystem::remove_all(path);
     }
     
-    
-    
-    
-    
-    bool fs_exists(const boost::filesystem::path& path) const {
-        return boost::filesystem::exists(path);
-    }
-    
-    bool fs_is_directory(const boost::filesystem::path& path) const {
-        return boost::filesystem::is_directory(path);
-    }
-    
-    bool fs_regular_file(const boost::filesystem::path& path) const {
-        return boost::filesystem::is_regular_file(path);
-    }
-    
-    bool fs_create_directory(const boost::filesystem::path& path) const {
-        return (fs_exists(path) && fs_is_directory(path)) || boost::filesystem::create_directory(path);
-    }
-    
-    std::unique_ptr<fuse_file_t> fs_create_file(const boost::filesystem::path& path) const {
-        int fd = ::open(path.c_str(), O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
-        if (fd == -1) {
-            throw api_exception_t("open() error for " + std::string(path.c_str()), errno);
-        }
-        
-        return std::unique_ptr<fuse_file_t>(new fuse_file_t(path.c_str(), fd));
-    }
     
     
 private:
