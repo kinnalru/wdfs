@@ -1,28 +1,3 @@
-/*
- *  this file is part of wdfs --> http://noedler.de/projekte/wdfs/
- *
- *  wdfs is a webdav filesystem with special features for accessing subversion
- *  repositories. it is based on fuse v2.5+ and neon v0.24.7+.
- *
- *  copyright (c) 2005 - 2007 jens m. noedler, noedler@web.de
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
- *
- *  This program is released under the GPL with the additional exemption
- *  that compiling, linking and/or using OpenSSL is allowed.
- */
 
 #include <string.h>
 #include <errno.h>
@@ -35,13 +10,20 @@
 #include <fstream>
 
 #include <boost/foreach.hpp>
+
+#include <QObject>
 #include <QUrl>
 #include <QDebug>
 #include <QDir>
 
+#include "qfuse.h"
+
 
 #include "common.h"
 #include "wdfs-main.h"
+
+#include "qwebdavlib/qwebdavlib/qwebdav.h"
+QWebdav* webdav = NULL;
 
 
 /* there are four locking modes available. the simple locking mode locks a file 
@@ -133,6 +115,7 @@ static struct fuse_opt wdfs_opts[] = {
 static int wdfs_opt_proc(
     void *data, const char *option, int key, struct fuse_args *option_list)
 {
+    qDebug() << "Key: " << key;
     switch (key) {
         case KEY_HELP:
             print_help();
@@ -183,46 +166,11 @@ static int wdfs_opt_proc(
             return 1;
 
         default:
-            fprintf(stderr, "%s: unknown option '%s'\n",
+            qDebug("%s: unknown option '%s'\n",
                 wdfs_cfg.program_name, option);
             exit(1);
     }
 }
-
-
-/* webdav server base directory. if you are connected to "http://server/dir/"
- * remotepath_basedir is set to "/dir" (starting slash, no ending slash).
- * if connected to the root directory (http://server/) it will be set to "". */
-char *remotepath_basedir = 0;
-
-struct readdir_ctx_t {
-    void *buf;
-    fuse_fill_dir_t filler;
-    std::shared_ptr<char> remotepath;
-    std::vector<std::string> oldfiles;
-};
-
-/* returns a filehandle for read and write on success or -1 on error */
-static int get_filehandle()
-{
-    char dummyfile[] = "/tmp/wdfs-tmp-XXXXXX";
-    /* mkstemp() replaces XXXXXX by unique random chars and
-        * returns a filehandle for reading and writing */
-    int fd = mkstemp(dummyfile);
-    if (fd == -1)
-        fprintf(stderr, "## mkstemp(%s) error\n", dummyfile);
-    if (unlink(dummyfile))
-        fprintf(stderr, "## unlink() error\n");
-    return fd;
-}
-
-std::string get_filename(const char* remotepath) {
-    /* extract filename from the path. it's the string behind the last '/'. */
-    const char *filename = strrchr(remotepath, '/');
-    filename++;
-    return filename;
-}
-
 
 /* +++ fuse callback methods +++ */
 
@@ -231,6 +179,11 @@ std::string get_filename(const char* remotepath) {
  * request. */
 static int wdfs_getattr(const char *localpath, struct stat *stat)
 {
+    qDebug() << Q_FUNC_INFO << "was called with localpath:" << localpath;
+    
+    fuse_context* fctx = fuse_get_context();
+    QWebdav* webdav = reinterpret_cast<QWebdav*>(fctx->private_data);
+    
 //     namespace fs = boost::filesystem;
 //     
 //     LOG_ENEX(localpath, "");  
@@ -313,6 +266,8 @@ static int wdfs_getattr(const char *localpath, struct stat *stat)
 //         wdfs_err("Unknown error in %s\n", __func__);
 //         return -EFAULT;
 //     }
+    
+    return 0;
 }
 
 /* this method adds the files to the requested directory using the webdav method
@@ -323,6 +278,8 @@ static int wdfs_readdir(
     const char *localpath, void *buf, fuse_fill_dir_t filler,
     off_t offset, struct fuse_file_info *fi)
 {
+     qDebug() << Q_FUNC_INFO << "was called with localpath:" << localpath;
+     
 //     assert(localpath && filler);    
 //     LOG_ENEX(localpath, "");
 // 
@@ -390,7 +347,9 @@ static int wdfs_readdir(
 //     catch (...) {
 //         wdfs_err("Unknown error in %s\n", __func__);
 //         return -EFAULT;
-//     }    
+//     }  
+     
+    return 0;
 }
 
 
@@ -399,6 +358,7 @@ static int wdfs_readdir(
  * filehandle. also create a "struct open_file" to store the filehandle. */
 static int wdfs_open(const char *localpath, struct fuse_file_info *fi)
 {
+    qDebug() << Q_FUNC_INFO << "was called with localpath:" << localpath;
 //     LOG_ENEX(localpath, "");
 //     wdfs_pr("by PID %d\n", fuse_get_context()->pid);
 // 
@@ -460,6 +420,7 @@ static int wdfs_read(
     const char *localpath, char *buf, size_t size,
     off_t offset, struct fuse_file_info *fi)
 {
+    qDebug() << Q_FUNC_INFO << "was called with localpath:" << localpath;
 //     wdfs_dbg("%s(%s)\n", __func__, localpath); 
 //     assert(localpath && buf && fi);
 // 
@@ -471,6 +432,8 @@ static int wdfs_read(
 //     if (ret < 0) wdfs_err("pread() error: %s\n", strerror(errno));
 // 
 //     return ret;
+    
+    return 0;
 }
 
 
@@ -479,6 +442,7 @@ static int wdfs_write(
     const char *localpath, const char *buf, size_t size,
     off_t offset, struct fuse_file_info *fi)
 {
+    qDebug() << Q_FUNC_INFO << "was called with localpath:" << localpath;
 //     wdfs_dbg("%s(%s)\n", __func__, localpath); 
 //     assert(localpath && buf && fi);
 // 
@@ -492,6 +456,8 @@ static int wdfs_write(
 //     file->modified = true;
 // 
 //     return ret;
+    
+    return 0;
 }
 
 
@@ -501,6 +467,7 @@ static int wdfs_write(
  * time to put it to the server, but only if it was modified. */
 static int wdfs_release(const char *localpath, struct fuse_file_info *fi)
 {
+    qDebug() << Q_FUNC_INFO << "was called with localpath:" << localpath;
 //     wdfs_dbg("%s(%s)\n", __func__, localpath); 
 //     assert(localpath);
 // 
@@ -545,6 +512,7 @@ static int wdfs_release(const char *localpath, struct fuse_file_info *fi)
  */
 static int wdfs_truncate(const char *localpath, off_t size)
 {
+    qDebug() << Q_FUNC_INFO << "was called with localpath:" << localpath;
 //     wdfs_dbg("%s(%s)\n", __func__, localpath); 
 //     wdfs_pr("   ++ at offset %li\n", (long int)size);
 // 
@@ -609,6 +577,7 @@ static int wdfs_truncate(const char *localpath, off_t size)
 static int wdfs_ftruncate(
     const char *localpath, off_t size, struct fuse_file_info *fi)
 {
+    qDebug() << Q_FUNC_INFO << "was called with localpath:" << localpath;
 //     wdfs_dbg("%s(%s)\n", __func__, localpath); 
 //     assert(localpath && fi);
 // 
@@ -642,6 +611,7 @@ static int wdfs_ftruncate(
  * this method creates a empty file using the webdav method put. */
 static int wdfs_mknod(const char *localpath, mode_t mode, dev_t rdev)
 {
+    qDebug() << Q_FUNC_INFO << "was called with localpath:" << localpath;
 //     wdfs_dbg("%s(%s)\n", __func__, localpath); 
 //     assert(localpath);
 // 
@@ -668,6 +638,7 @@ static int wdfs_mknod(const char *localpath, mode_t mode, dev_t rdev)
  * this method creates a directory / collection using the webdav method mkcol. */
 static int wdfs_mkdir(const char *localpath, mode_t mode)
 {
+    qDebug() << Q_FUNC_INFO << "was called with localpath:" << localpath;
 //     wdfs_dbg("%s(%s)\n", __func__, localpath); 
 //     assert(localpath);
 // 
@@ -687,6 +658,7 @@ static int wdfs_mkdir(const char *localpath, mode_t mode)
  * this methods removes a file or directory using the webdav method delete. */
 static int wdfs_unlink(const char *localpath)
 {
+    qDebug() << Q_FUNC_INFO << "was called with localpath:" << localpath;
 //     wdfs_dbg("%s(%s)\n", __func__, localpath); 
 //     assert(localpath);
 // 
@@ -719,6 +691,8 @@ static int wdfs_unlink(const char *localpath)
 //     }
 
 //     return ret;
+    
+    return 0;
 }
 
 
@@ -726,6 +700,7 @@ static int wdfs_unlink(const char *localpath)
  * this methods renames a file. it uses the webdav method move to do that. */
 static int wdfs_rename(const char *localpath_src, const char *localpath_dest)
 {
+    qDebug() << Q_FUNC_INFO << "was called with localpath_src:" << localpath_src << " and localpath_dest:" << localpath_dest;
 //     wdfs_dbg("%s(%s -> %s)\n", __func__, localpath_src, localpath_dest); 
 //     assert(localpath_src && localpath_dest);
 // 
@@ -757,11 +732,14 @@ static int wdfs_rename(const char *localpath_src, const char *localpath_dest)
 //     }
 // 
 //     return ret;
+    
+    return 0;
 }
 
 
 int wdfs_chmod(const char *localpath, mode_t mode)
 {
+    qDebug() << Q_FUNC_INFO << "was called with localpath:" << localpath;
 //     wdfs_dbg("%s(%s)\n", __func__, localpath);
 //     assert(localpath);
 //     
@@ -807,6 +785,7 @@ int wdfs_chmod(const char *localpath, mode_t mode)
  * the file's content or properties change. */
 static int wdfs_setattr(const char *localpath, struct utimbuf *buf)
 {
+    qDebug() << Q_FUNC_INFO << "was called with localpath:" << localpath;
 //     wdfs_dbg("%s(%s)\n", __func__, localpath);
 //     assert(localpath);
 
@@ -817,6 +796,7 @@ static int wdfs_setattr(const char *localpath, struct utimbuf *buf)
 /* this is a dummy implementation that pretends to have 1000 GB free space :D */
 static int wdfs_statfs(const char *localpath, struct statvfs *buf)
 {
+    qDebug() << Q_FUNC_INFO << "was called with localpath:" << localpath;
 //     wdfs_dbg("%s(%s)\n", __func__, localpath);
 //     assert(localpath);
 // 
@@ -832,13 +812,12 @@ static int wdfs_statfs(const char *localpath, struct statvfs *buf)
 
 /* just say hello when fuse takes over control. */
 #if FUSE_VERSION >= 26
-    static void* wdfs_(struct fuse_conn_info *conn)
+    static void* wdfs_init(struct fuse_conn_info *conn)
 #else
     static void* wdfs_init()
 #endif
 {
-//     wdfs_dbg("%s()\n", __func__);
-
+    qDebug() << Q_FUNC_INFO;
 //     cache.reset(new cache_t(wdfs_cfg.cachedir, wdfs_cfg.webdav_remotebasedir));
     
 //     wdfs.reset(new wdfs_controller_t(wdfs_cfg.webdav_server, wdfs_cfg.webdav_remotebasedir));
@@ -857,7 +836,7 @@ static int wdfs_statfs(const char *localpath, struct statvfs *buf)
 // 
 //     wdfs_dbg("%s() restored cache size: %d\n", __func__, cache->size());
 
-    return NULL;
+    return new QWebdav();
 }
 
 
@@ -865,6 +844,7 @@ static int wdfs_statfs(const char *localpath, struct statvfs *buf)
  * this method is called, when the filesystems is unmounted. time to clean up! */
 static void wdfs_destroy(void*)
 {
+    qDebug() << Q_FUNC_INFO;
 // //     wdfs_dbg("%s()\n", __func__);
 // // 
 // //     try {
@@ -962,12 +942,9 @@ static int call_fuse_main(struct fuse_args *args)
 #endif
 }
 
-struct test_t {
-    int a;
-    double b;
-};
+#include <error.h>
 
-
+#include <fuse_lowlevel.h>
 /* the main method does the option parsing using fuse_opt_parse(), establishes
  * the connection to the webdav resource and finally calls main_fuse(). */
 int main(int argc, char *argv[])
@@ -988,7 +965,6 @@ int main(int argc, char *argv[])
         exit(1);
     }
     
-    qDebug() << "exit";
     
     
     if (!webdav_url.isValid()) {
@@ -1054,29 +1030,36 @@ int main(int argc, char *argv[])
         memset(argv[arg_number], 0, strlen(argv[arg_number]));
     }
 
-    exit(1);
+//     webdav = new QWebdav();
+//     
+//     auto path = webdav_url.path() + "/";
+//     path.replace("//", "/");
+//     
+//     webdav->setConnectionSettings(
+//         webdav_url.scheme() == "https" ? QWebdav::HTTPS : QWebdav::HTTP,
+//         webdav_url.host(),
+//         path,
+//         wdfs_cfg.username.c_str(),
+//         wdfs_cfg.password.c_str()
+//     );
     
-    /* set up webdav connection, exit on error */
-//     if (setup_webdav_session(*uri, wdfs_cfg.username, wdfs_cfg.password)) {
-//         status_program_exec = 1;
-//         goto cleanup;
-//     }
-	 
-    if (remotepath_basedir) {
-        wdfs_cfg.webdav_remotebasedir = remotepath_basedir;
-    }
-//     wdfs_cfg.webdav_server = ne_uri_unparse(uri.get());
-//     wdfs_cfg.webdav_server = std::string(uri->scheme) + "://" + uri->host;
-//     if (uri->port) {
-//        wdfs_cfg.webdav_server +=  ":" + std::to_string(uri->port);
-//     }
-    //wdfs_cfg.webdav_server = wdfs_cfg.webdav_server.substr(0, wdfs_cfg.webdav_server.find(wdfs_cfg.webdav_remotebasedir));
-    std::cerr << "SRV:" << wdfs_cfg.webdav_server << std::endl;
+    qDebug() << wdfs_cfg.mountpoint.c_str();
 
+        
+
+//         res = fuse_loop(fuse);
+
+    
+    QCoreApplication app(argc, argv);
+    QFuse* qf = new QFuse(&wdfs_operations, &options);
+    QTimer::singleShot(0, qf, SLOT(init()));
+    
+    
+    return app.exec();
+    
     /* finally call fuse */
-    status_program_exec = call_fuse_main(&options);
+//      status_program_exec = call_fuse_main(&options);
 
-    /* clean up and quit wdfs */
 cleanup:
     fuse_opt_free_args(&options);
 

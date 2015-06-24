@@ -7,6 +7,8 @@ endif(COMMAND cmake_policy)
 
 add_definitions("-std=c++0x")
 
+include_directories(${CMAKE_CURRENT_SOURCE_DIR})
+
 add_subdirectory(qwebdavlib/qwebdavlib)
 add_subdirectory(src)
 

@@ -1,12 +1,8 @@
 #ifndef WDFSMAIN_H_
 #define WDFSMAIN_H_
 
-#define FUSE_USE_VERSION 25
-
 #include <memory>
 #include <string>
-
-#include <fuse.h>
 
 
 struct wdfs_conf {

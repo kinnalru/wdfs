@@ -24,15 +24,24 @@ add_definitions(-D_FILE_OFFSET_BITS=64)
 add_definitions(-D_GNU_SOURCE -D_REENTRANT)
 
 set(HEADERS
-	common.h
-	wdfs-main.h
+    common.h
+    wdfs-main.h
+    qfuse.h
 )
 
 set(SOURCES
-	wdfs-main.cpp
-	common.cpp
+    wdfs-main.cpp
+    common.cpp
+    qfuse.cpp
 )
 
+set(MOC
+    qfuse.h
+    qfuseloop.h
+)
+
+qt4_wrap_cpp(SOURCES ${MOC})
+
 add_executable(${TARGET} ${HEADERS} ${SOURCES})
-target_link_libraries(${TARGET} ${Boost_LIBRARIES} ${QT_LIBRARIES} pthread fuse)
+target_link_libraries(${TARGET} ${Boost_LIBRARIES} ${QT_LIBRARIES} pthread fuse qwebdavlib)
 
