@@ -7,5 +7,6 @@ endif(COMMAND cmake_policy)
 
 add_definitions("-std=c++0x")
 
+add_subdirectory(qwebdavlib/qwebdavlib)
 add_subdirectory(src)
 

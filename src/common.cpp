@@ -9,9 +9,6 @@
 
 #include <boost/algorithm/string/replace.hpp>
 
-#include <glib.h>
-#include <ne_uri.h>
-
 #include "common.h"
 
 
@@ -28,59 +25,59 @@ char* remove_ending_slashes(const char* path)
 
 char* unify_path(const char* path_in, int mode)
 {
-    assert(path_in);
-    char *path_out = NULL;
-    
-
-    std::shared_ptr<char> path_tmp(strdup(path_in), free);
-    if (!path_tmp.get())
-        return NULL;
-
-    /* some servers send the complete URI not only the path.
-     * hence remove the server part and use the path only.
-     * example1:  before: "https://server.com/path/to/hell/"
-     *            after:  "/path/to/hell/"
-     * example2:  before: "http://server.com"
-     *            after:  ""                    */
-    if (g_str_has_prefix(path_tmp.get(), "http")) {
-        std::shared_ptr<char> tmp0(strdup(path_in), free);
-        /* jump to the 1st '/' of http[s]:// */
-        char *tmp1 = strchr(tmp0.get(), '/');
-        /* jump behind '//' and get the next '/'. voila: the path! */
-        char *tmp2 = strchr(tmp1 + 2, '/');
-
-        if (tmp2 == NULL)
-            path_tmp.reset(strdup(""));
-        else
-            path_tmp.reset(strdup(tmp2));
-    }
-
-    if (mode & LEAVESLASH) {
-        mode &= ~LEAVESLASH;
-    } else {
-        path_tmp.reset(remove_ending_slashes(path_tmp.get()));
-    }
-    
-    if (!path_tmp.get())
-        return NULL;
-
-    switch (mode) {
-        case ESCAPE:
-            path_out = ne_path_escape(path_tmp.get());
-            break;
-        case UNESCAPE:
-            path_out = ne_path_unescape(path_tmp.get());
-            break;
-        default:
-            fprintf(stderr, "## fatal error: unknown mode in %s()\n", __func__);
-            exit(1);
-    }
-
-    if (path_out == NULL)
-        return NULL;
-
-    
-    return path_out;
+//     assert(path_in);
+//     char *path_out = NULL;
+//     
+// 
+//     std::shared_ptr<char> path_tmp(strdup(path_in), free);
+//     if (!path_tmp.get())
+//         return NULL;
+// 
+//     /* some servers send the complete URI not only the path.
+//      * hence remove the server part and use the path only.
+//      * example1:  before: "https://server.com/path/to/hell/"
+//      *            after:  "/path/to/hell/"
+//      * example2:  before: "http://server.com"
+//      *            after:  ""                    */
+//     if (g_str_has_prefix(path_tmp.get(), "http")) {
+//         std::shared_ptr<char> tmp0(strdup(path_in), free);
+//         /* jump to the 1st '/' of http[s]:// */
+//         char *tmp1 = strchr(tmp0.get(), '/');
+//         /* jump behind '//' and get the next '/'. voila: the path! */
+//         char *tmp2 = strchr(tmp1 + 2, '/');
+// 
+//         if (tmp2 == NULL)
+//             path_tmp.reset(strdup(""));
+//         else
+//             path_tmp.reset(strdup(tmp2));
+//     }
+// 
+//     if (mode & LEAVESLASH) {
+//         mode &= ~LEAVESLASH;
+//     } else {
+//         path_tmp.reset(remove_ending_slashes(path_tmp.get()));
+//     }
+//     
+//     if (!path_tmp.get())
+//         return NULL;
+// 
+//     switch (mode) {
+//         case ESCAPE:
+//             path_out = ne_path_escape(path_tmp.get());
+//             break;
+//         case UNESCAPE:
+//             path_out = ne_path_unescape(path_tmp.get());
+//             break;
+//         default:
+//             fprintf(stderr, "## fatal error: unknown mode in %s()\n", __func__);
+//             exit(1);
+//     }
+// 
+//     if (path_out == NULL)
+//         return NULL;
+// 
+//     
+//     return path_out;
 }
 
 void free_chars(char **arg, ...)
@@ -99,42 +96,42 @@ void free_chars(char **arg, ...)
 
 std::string canonicalize(const std::string& path, string_mode_e mode)
 {
-    std::string result(path);
-    boost::replace_all(result, "//", "/");
-    boost::replace_all(result, "//", "/");
-    if (mode == ESCAPE) {
-        string_p tmp(ne_path_escape(result.c_str()), free);
-        result = tmp.get();
-    }
-    else if (mode == UNESCAPE) {
-        string_p tmp(ne_path_unescape(result.c_str()), free);
-        result = tmp.get();
-    }
-    
-    if (result.size() > 1 && *(--result.end()) == '/')
-        result.pop_back();
-    
-    return result;
+//     std::string result(path);
+//     boost::replace_all(result, "//", "/");
+//     boost::replace_all(result, "//", "/");
+//     if (mode == ESCAPE) {
+//         string_p tmp(ne_path_escape(result.c_str()), free);
+//         result = tmp.get();
+//     }
+//     else if (mode == UNESCAPE) {
+//         string_p tmp(ne_path_unescape(result.c_str()), free);
+//         result = tmp.get();
+//     }
+//     
+//     if (result.size() > 1 && *(--result.end()) == '/')
+//         result.pop_back();
+//     
+//     return result;
 }
 
 string_p canonicalize(const string_p& path, string_mode_e mode)
 {
-    std::string result(path.get());
-    boost::replace_all(result, "//", "/");
-    boost::replace_all(result, "//", "/");
-    if (mode == ESCAPE) {
-        string_p tmp(ne_path_escape(result.c_str()), free);
-        result = tmp.get();
-    }
-    else if (mode == UNESCAPE) {
-        string_p tmp(ne_path_unescape(result.c_str()), free);
-        result = tmp.get();
-    }    
-    
-    if (result.size() > 1 && *(--result.end()) == '/')
-        result.pop_back();
-    
-    return mk_string(result);
+//     std::string result(path.get());
+//     boost::replace_all(result, "//", "/");
+//     boost::replace_all(result, "//", "/");
+//     if (mode == ESCAPE) {
+//         string_p tmp(ne_path_escape(result.c_str()), free);
+//         result = tmp.get();
+//     }
+//     else if (mode == UNESCAPE) {
+//         string_p tmp(ne_path_unescape(result.c_str()), free);
+//         result = tmp.get();
+//     }    
+//     
+//     if (result.size() > 1 && *(--result.end()) == '/')
+//         result.pop_back();
+//     
+//     return mk_string(result);
 }
 
 

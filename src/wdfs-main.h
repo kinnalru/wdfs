@@ -1,36 +1,13 @@
 #ifndef WDFSMAIN_H_
 #define WDFSMAIN_H_
 
-#ifdef HAVE_CONFIG_H
-	#include <config.h>
-#endif
-
 #define FUSE_USE_VERSION 25
 
 #include <memory>
 #include <string>
 
 #include <fuse.h>
-#include <ne_basic.h>
 
-/* build the neon version, which is not directly exported by the neon library */
-#if defined(NE_FEATURE_TS_SSL)	/* true for neon 0.26+  */
-	#define NEON_VERSION 26
-#elif defined(NE_FEATURE_SSL)	/* true for neon 0.25+  */
-	#define NEON_VERSION 25
-#else							/* neon 0.24 is the minimal requirement */
-	#define NEON_VERSION 24
-#endif
-/* 	it's also possible to replace the above with the following: 
-	(file configure.ac, after the PKG_CHECK_MODULES call)
-
-	case `pkg-config --modversion neon` in
-		0.24*) AC_DEFINE(NEON_VERSION, 24,
-				[The minor version number of the neon library]) ;;
-		0.25*) AC_DEFINE(NEON_VERSION, 25) ;;
-		*)     AC_DEFINE(NEON_VERSION, 26) ;;
-	esac
-*/
 
 struct wdfs_conf {
     /* the name of the wdfs executable */
