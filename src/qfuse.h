@@ -28,9 +28,9 @@ private Q_SLOTS:
 private:
     struct fuse_operations* fo_;
     struct fuse_args* fa_;
-    
-    struct fuse *fuse_;
-    struct fuse_chan *ch_;
+
+    std::shared_ptr<struct fuse_chan> fuse_ch_;
+    std::shared_ptr<struct fuse> fuse_;
     
     QThread fuse_th_;
     

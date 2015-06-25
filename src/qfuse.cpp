@@ -58,76 +58,48 @@ QFuse::QFuse(struct fuse_operations* fo, struct fuse_args* fa, QObject* parent)
     : QObject(parent)
     , fo_(fo)
     , fa_(fa)
-    , ch_(NULL)
-    , fuse_(NULL)
 {}
 
 void QFuse::init()
 {
-char *mountpoint;
-        int multithreaded = 0;
-
-        struct fuse_args args = *fa_;
-        struct fuse *fuse;
-        int foreground;
-        int res;
-
-        qDebug() << 1 ;
-        res = fuse_parse_cmdline(&args, &mountpoint, &multithreaded, &foreground);
+        char *mountpoint;
+        int mt;
+        int fg;
         
-//         qDebug() << 2 ;
-        if (res == -1) {
-                 qDebug() << "err 0";
-        }
-
-        qDebug() << 3;
-        ch_ = fuse_mount( mountpoint, &args);
-        qDebug() << 4;
-        if (!ch_) {
-                fuse_opt_free_args(&args);
-//                 goto err_free;
-        }
-
-        fuse = fuse_new(ch_, &args, fo_, sizeof(struct fuse_operations), 0);
-        fuse_opt_free_args(&args);
-        if (fuse == NULL) {
-//                 goto err_unmount;
-            qDebug() << "err 1";
+        if (fuse_parse_cmdline(fa_, &mountpoint, &mt, &fg) == -1) {
+            qFatal("can't init fuse args");
         }
         
-        fuse_ = fuse;
+        mt = 0;
+        
+        qDebug("mt: %d(forced) fg: %d", mt, fg);
+        
+       
+        fuse_ch_.reset(fuse_mount(mountpoint, fa_), [mountpoint](struct fuse_chan *ch){fuse_unmount(mountpoint, ch);});
 
-        res = fuse_daemonize(foreground);
-        if (res == -1) {
-//                 goto err_unmount;
-            qDebug() << "err 2";
+        if (!fuse_ch_) {
+            qFatal("can't create fuse channel");
         }
+
+        fuse_.reset(fuse_new(fuse_ch_.get(), fa_, fo_, sizeof(struct fuse_operations), 0), fuse_destroy);
+        if (!fuse_) {
+            qFatal("can't create fuse fs");
+        }
+        
+//         res = fuse_daemonize(foreground);
+//         if (res == -1) {
+//                 goto err_unmount;
+//             qDebug() << "err 2";
+//         }
 
 //         res = fuse_set_signal_handlers(fuse_get_session(fuse));
 //         if (res == -1) {
 // //                 goto err_unmount;
 //             qDebug() << "err 3";
 //         }
-    
-//     qDebug() << Q_FUNC_INFO << "1";
-//     ch_ = fuse_mount("/tmp/fs/", fa_);
-//     
-//     qDebug() << Q_FUNC_INFO << "2";
-//     if(!ch_) {
-//         qFatal("fuse_mount error");
-//     }
-//     
-//     qDebug() << Q_FUNC_INFO << "3: "<< sizeof(struct fuse_operations);
-//     fuse_ = fuse_new(ch_, fa_, fo_, sizeof(struct fuse_operations), NULL);
-//     
-//     qDebug() << Q_FUNC_INFO << "4";
-//     if(fuse_) {
-// //         fuse_unmount("/tmp/fs/", fs.ch);
-//         qFatal("fuse_new error");
-//     }
-    
+
     qDebug() << Q_FUNC_INFO << "5";
-    QFuseLoop* loop = new QFuseLoop(fuse_get_session(fuse_));
+    QFuseLoop* loop = new QFuseLoop(fuse_get_session(fuse_.get()));
     qDebug() << Q_FUNC_INFO << "6";
     
     loop->moveToThread(&fuse_th_);
@@ -149,7 +121,7 @@ void QFuse::processBuf(fuse_buf* fbuf, fuse_chan* ch)
 {
      qDebug() << Q_FUNC_INFO;
      
-     fuse_session_process_buf(fuse_get_session(fuse_), fbuf, ch);
+     fuse_session_process_buf(fuse_get_session(fuse_.get()), fbuf, ch);
 }
 
 
