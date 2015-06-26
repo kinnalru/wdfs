@@ -26,18 +26,19 @@ add_definitions(-D_GNU_SOURCE -D_REENTRANT)
 set(HEADERS
     common.h
     wdfs-main.h
-    qfuse.h
 )
 
 set(SOURCES
     wdfs-main.cpp
     common.cpp
     qfuse.cpp
+    qsighandler.cpp
 )
 
 set(MOC
     qfuse.h
     qfuseloop.h
+    qsighandler.h    
 )
 
 qt4_wrap_cpp(SOURCES ${MOC})

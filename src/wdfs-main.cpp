@@ -3,6 +3,11 @@
 #include <errno.h>
 #include <assert.h>
 
+#include <sys/socket.h>
+#include <sys/types.h>
+#include <signal.h>
+#include <unistd.h>
+
 #include <memory>
 #include <vector>
 #include <string>
@@ -17,6 +22,7 @@
 #include <QDir>
 
 #include "qfuse.h"
+#include "qsighandler.h"
 
 
 #include "common.h"
@@ -179,7 +185,7 @@ static int wdfs_opt_proc(
  * request. */
 static int wdfs_getattr(const char *localpath, struct stat *stat)
 {
-    qDebug() << Q_FUNC_INFO << "was called with localpath:" << localpath;
+    qDebug() << Q_FUNC_INFO << "was called with localpath:" << localpath << " th:" << QThread::currentThread();
     
     fuse_context* fctx = fuse_get_context();
     QWebdav* webdav = reinterpret_cast<QWebdav*>(fctx->private_data);
@@ -817,7 +823,7 @@ static int wdfs_statfs(const char *localpath, struct statvfs *buf)
     static void* wdfs_init()
 #endif
 {
-    qDebug() << Q_FUNC_INFO;
+    qDebug() << Q_FUNC_INFO << " th:" << QThread::currentThread();
 //     cache.reset(new cache_t(wdfs_cfg.cachedir, wdfs_cfg.webdav_remotebasedir));
     
 //     wdfs.reset(new wdfs_controller_t(wdfs_cfg.webdav_server, wdfs_cfg.webdav_remotebasedir));
@@ -1045,15 +1051,27 @@ int main(int argc, char *argv[])
     
     qDebug() << wdfs_cfg.mountpoint.c_str();
 
-        
-
-//         res = fuse_loop(fuse);
-
-    
     QCoreApplication app(argc, argv);
-    QFuse* qf = new QFuse(&wdfs_operations, &options);
-    QTimer::singleShot(0, qf, SLOT(init()));
+    QFuse qfuse(&wdfs_operations, &options);
+    QTimer::singleShot(1000, &qfuse, SLOT(start()));
+
+    QSigHandler* h = new QSigHandler();
     
+    
+//     struct sigaction pipe;
+//     pipe.sa_handler = QSigHandler::sigtermHandler;
+//     sigemptyset(&pipe.sa_mask);
+//     pipe.sa_flags |= SA_RESTART;
+// 
+//     if (sigaction(SIGHUP, &pipe, 0) > 0)
+//         throw std::runtime_error("Can't setup sigterm handler");
+    
+    
+    
+    
+    qDebug() << "main thread:" << QThread::currentThread() << ".";
+    
+    qDebug() << "123";
     
     return app.exec();
     

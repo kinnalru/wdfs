@@ -1,7 +1,7 @@
 #ifndef QFUSE_HH
 #define QFUSE_HH
 
-#define FUSE_USE_VERSION 29
+#define FUSE_USE_VERSION 26
 
 #include <QDebug>
 #include <QObject>
@@ -16,11 +16,12 @@
 class QFuse : public QObject {
     Q_OBJECT
 public:
-    QFuse(struct fuse_operations* fo, struct fuse_args* fa, QObject* parent = 0);
+    QFuse(struct fuse_operations* fo, struct fuse_args* fa);
     ~QFuse();
     
 public Q_SLOTS:
-    void init();
+    void start();
+    void stop();
     
 private Q_SLOTS:
     void processBuf(struct fuse_buf* fbuf, struct fuse_chan* ch);
@@ -33,10 +34,7 @@ private:
     std::shared_ptr<struct fuse> fuse_;
     
     QThread fuse_th_;
-    
-    int fuse_stat;
-    int argc;
-    char** argv;
 };
+
 
 #endif
