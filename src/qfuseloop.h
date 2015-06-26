@@ -83,7 +83,7 @@ public Q_SLOTS:
 //         return ;
 
         QLocalSocket socket;
-        socket.setSocketDescriptor(fuse_chan_fd(ch));
+        socket.setSocketDescriptor(fuse_chan_fd(ch), QLocalSocket::ConnectedState, QIODevice::ReadOnly);
         
         while (!fuse_session_exited(fuse_se_)) {
             struct fuse_chan *tmpch = ch;
@@ -91,11 +91,11 @@ public Q_SLOTS:
             fbuf.mem = buf.get();
             fbuf.size = bufsize;
 
-            qDebug() << Q_FUNC_INFO << " Read th:" << QThread::currentThread();
+//             qDebug() << Q_FUNC_INFO << " Read th:" << QThread::currentThread();
             
             
 
-//             socket.waitForReadyRead();
+//              socket.waitForReadyRead(1);
             
             int res = fuse_session_receive_buf(fuse_se_, &fbuf, &tmpch);
             qDebug() << Q_FUNC_INFO << " res:" << res;
